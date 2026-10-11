@@ -1,1 +1,4 @@
 
+<resources>
+    <style name="Theme.Assistant" parent="Theme.AppCompat.Light.DarkActionBar" />
+</resources>
