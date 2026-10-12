@@ -14,8 +14,7 @@ sealed class GeminiResult {
     data class FunctionCall(
         val name: String,
         val arguments: JSONObject,
-        val callId: String,
-        val interactionId: String
+        val modelContent: JSONObject
     ) : GeminiResult()
 
     data class FinalText(val text: String) : GeminiResult()
@@ -24,58 +23,27 @@ sealed class GeminiResult {
 class GeminiClient(private val apiKey: String) {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
         .build()
 
-    private val endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions"
-    private val model = "gemini-3.8-flash"
+    private val model = "gemini-2.5-flash"
+    private val endpoint =
+        "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
-    suspend fun sendPrompt(prompt: String, tools: JSONArray): GeminiResult =
+    suspend fun sendConversation(contents: JSONArray, tools: JSONArray): GeminiResult =
         withContext(Dispatchers.IO) {
             val body = JSONObject().apply {
-                put("model", model)
-                put("input", prompt)
+                put("contents", contents)
                 put("tools", tools)
             }
             parseResponse(execute(body))
         }
 
-    suspend fun sendFunctionResult(
-        previousInteractionId: String,
-        functionName: String,
-        callId: String,
-        result: JSONObject,
-        tools: JSONArray
-    ): GeminiResult = withContext(Dispatchers.IO) {
-        val resultStep = JSONObject().apply {
-            put("type", "function_result")
-            put("name", functionName)
-            put("call_id", callId)
-            put(
-                "result",
-                JSONArray().put(
-                    JSONObject().apply {
-                        put("type", "text")
-                        put("text", result.toString())
-                    }
-                )
-            )
-        }
-        val body = JSONObject().apply {
-            put("model", model)
-            put("previous_interaction_id", previousInteractionId)
-            put("tools", tools)
-            put("input", JSONArray().put(resultStep))
-        }
-        parseResponse(execute(body))
-    }
-
     private fun execute(body: JSONObject): JSONObject {
         val requestBody = body.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url(endpoint)
-            .addHeader("x-goog-api-key", apiKey)
             .post(requestBody)
             .build()
 
@@ -89,22 +57,30 @@ class GeminiClient(private val apiKey: String) {
     }
 
     private fun parseResponse(response: JSONObject): GeminiResult {
-        val interactionId = response.optString("id")
-        val steps = response.optJSONArray("steps") ?: JSONArray()
+        val candidates = response.optJSONArray("candidates") ?: JSONArray()
+        if (candidates.length() == 0) {
+            return GeminiResult.FinalText("Модель не вернула ответ")
+        }
+        val content = candidates.getJSONObject(0).optJSONObject("content") ?: JSONObject()
+        val parts = content.optJSONArray("parts") ?: JSONArray()
 
-        for (i in 0 until steps.length()) {
-            val step = steps.getJSONObject(i)
-            if (step.optString("type") == "function_call") {
+        for (i in 0 until parts.length()) {
+            val part = parts.getJSONObject(i)
+            if (part.has("functionCall")) {
+                val fc = part.getJSONObject("functionCall")
                 return GeminiResult.FunctionCall(
-                    name = step.getString("name"),
-                    arguments = step.optJSONObject("arguments") ?: JSONObject(),
-                    callId = step.getString("id"),
-                    interactionId = interactionId
+                    name = fc.getString("name"),
+                    arguments = fc.optJSONObject("args") ?: JSONObject(),
+                    modelContent = content
                 )
             }
         }
 
-        val text = response.optString("output_text", "Не удалось распознать ответ модели")
-        return GeminiResult.FinalText(text)
+        val text = StringBuilder()
+        for (i in 0 until parts.length()) {
+            val part = parts.getJSONObject(i)
+            if (part.has("text")) text.append(part.getString("text"))
+        }
+        return GeminiResult.FinalText(if (text.isEmpty()) "Пустой ответ от модели" else text.toString())
     }
 }
