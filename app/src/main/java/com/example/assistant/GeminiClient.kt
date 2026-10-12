@@ -1,4 +1,3 @@
-```kotlin
 package com.example.assistant
 
 import kotlinx.coroutines.Dispatchers
@@ -11,10 +10,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/**
- * Результат ответа модели: либо она хочет вызвать функцию,
- * либо сразу вернула финальный текстовый ответ.
- */
 sealed class GeminiResult {
     data class FunctionCall(
         val name: String,
@@ -26,10 +21,6 @@ sealed class GeminiResult {
     data class FinalText(val text: String) : GeminiResult()
 }
 
-/**
- * Простой клиент к Gemini Interactions API через REST (OkHttp),
- * без привязки к конкретной версии официального Kotlin-SDK.
- */
 class GeminiClient(private val apiKey: String) {
 
     private val client = OkHttpClient.Builder()
@@ -38,9 +29,8 @@ class GeminiClient(private val apiKey: String) {
         .build()
 
     private val endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions"
-    private val model = "gemini-3.8-flash" // смени здесь, если Google выпустит новую модель
+    private val model = "gemini-3.8-flash"
 
-    /** Отправляет текст пользователя вместе с описанием доступных функций. */
     suspend fun sendPrompt(prompt: String, tools: JSONArray): GeminiResult =
         withContext(Dispatchers.IO) {
             val body = JSONObject().apply {
@@ -51,7 +41,6 @@ class GeminiClient(private val apiKey: String) {
             parseResponse(execute(body))
         }
 
-    /** Отправляет результат выполнения функции обратно модели и получает финальный ответ. */
     suspend fun sendFunctionResult(
         previousInteractionId: String,
         functionName: String,
@@ -95,7 +84,6 @@ class GeminiClient(private val apiKey: String) {
             if (!resp.isSuccessful) {
                 throw IllegalStateException("Gemini API error ${resp.code}: $raw")
             }
-            // Полезно на первых запусках: android.util.Log.d("GeminiClient", raw)
             return JSONObject(raw)
         }
     }
@@ -120,4 +108,3 @@ class GeminiClient(private val apiKey: String) {
         return GeminiResult.FinalText(text)
     }
 }
-```
