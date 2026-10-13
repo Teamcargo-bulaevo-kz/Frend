@@ -3,15 +3,17 @@ package com.example.assistant
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /**
  * Связывает модель (GroqClient) с реальными действиями (PhoneActions, NoteActions):
- * описывает доступные функции, отправляет запрос, выполняет то, что решит модель,
- * и возвращает финальный текстовый ответ для UI.
+ * описывает доступные функции, сначала проверяет локальный кэш выученных команд,
+ * и только если фразы там нет — идёт в Groq.
  */
 class AssistantRepository(private val context: Context, apiKey: String) {
 
     private val client = GroqClient(apiKey)
+    private val patternDao = NoteDatabase.getInstance(context).commandPatternDao()
 
     private val tools: JSONArray = JSONArray().apply {
         put(functionTool(
@@ -103,8 +105,20 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         })
     }
 
-    /** Главная точка входа: отправляет запрос пользователя и выполняет то, что решит модель. */
+    private fun normalize(text: String): String =
+        text.trim().lowercase(Locale.getDefault())
+
+    /** Главная точка входа. Сначала смотрим в локальный кэш выученных команд. */
     suspend fun handle(prompt: String): String {
+        val normalized = normalize(prompt)
+        val cached = patternDao.find(normalized)
+        if (cached != null) {
+            val args = try { JSONObject(cached.argumentsJson) } catch (e: Exception) { JSONObject() }
+            val result = executeFunction(cached.functionName, args)
+            patternDao.upsert(cached.copy(useCount = cached.useCount + 1, lastUsed = System.currentTimeMillis()))
+            return result
+        }
+
         return try {
             val messages = JSONArray().apply {
                 put(JSONObject().apply {
@@ -118,45 +132,51 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
             when (val result = client.sendConversation(messages, tools)) {
                 is GroqResult.FinalText -> result.text
-                is GroqResult.FunctionCall -> executeAndRespond(messages, result)
+                is GroqResult.FunctionCall -> executeAndRespond(messages, normalized, result)
             }
         } catch (e: Exception) {
             "Ошибка: ${e.message}"
         }
     }
 
-    private suspend fun executeAndRespond(messages: JSONArray, call: GroqResult.FunctionCall): String {
-        val actionResult: String = when (call.name) {
-            "set_alarm" -> {
-                val hour = call.arguments.optInt("hour", 0)
-                val minute = call.arguments.optInt("minute", 0)
-                val label = if (call.arguments.has("label")) call.arguments.optString("label") else null
-                PhoneActions.setAlarm(context, hour, minute, label)
-            }
-            "play_music" -> {
-                val query = call.arguments.optString("query", "")
-                PhoneActions.playMusic(context, query)
-            }
-            "create_note" -> {
-                val text = call.arguments.optString("text", "")
-                NoteActions.createNote(context, text)
-            }
-            "list_notes" -> {
-                NoteActions.listNotes(context)
-            }
-            "search_notes" -> {
-                val query = call.arguments.optString("query", "")
-                NoteActions.searchNotes(context, query)
-            }
-            "delete_note" -> {
-                val query = call.arguments.optString("query", "")
-                NoteActions.deleteNote(context, query)
-            }
-            else -> "Неизвестная функция: ${call.name}"
+    private fun executeFunction(name: String, arguments: JSONObject): String = when (name) {
+        "set_alarm" -> {
+            val hour = arguments.optInt("hour", 0)
+            val minute = arguments.optInt("minute", 0)
+            val label = if (arguments.has("label")) arguments.optString("label") else null
+            PhoneActions.setAlarm(context, hour, minute, label)
         }
+        "play_music" -> {
+            val query = arguments.optString("query", "")
+            PhoneActions.playMusic(context, query)
+        }
+        else -> "Неизвестная функция: $name"
+    }
+
+    private suspend fun executeFunctionSuspend(name: String, arguments: JSONObject): String = when (name) {
+        "create_note" -> NoteActions.createNote(context, arguments.optString("text", ""))
+        "list_notes" -> NoteActions.listNotes(context)
+        "search_notes" -> NoteActions.searchNotes(context, arguments.optString("query", ""))
+        "delete_note" -> NoteActions.deleteNote(context, arguments.optString("query", ""))
+        else -> executeFunction(name, arguments)
+    }
+
+    private suspend fun executeAndRespond(
+        messages: JSONArray,
+        normalizedPhrase: String,
+        call: GroqResult.FunctionCall
+    ): String {
+        val actionResult = executeFunctionSuspend(call.name, call.arguments)
+
+        patternDao.upsert(
+            CommandPatternEntity(
+                phrase = normalizedPhrase,
+                functionName = call.name,
+                argumentsJson = call.arguments.toString()
+            )
+        )
 
         messages.put(call.assistantMessage)
-
         messages.put(JSONObject().apply {
             put("role", "tool")
             put("tool_call_id", call.toolCallId)
