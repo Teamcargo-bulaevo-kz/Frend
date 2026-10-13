@@ -28,7 +28,7 @@ class GroqClient(private val apiKey: String) {
         .readTimeout(45, TimeUnit.SECONDS)
         .build()
 
-    private val model = "llama-3.1-8b-instant"
+    private val model = "meta-llama/llama-4-maverick-17b-128e-instruct"
     private val endpoint = "https://api.groq.com/openai/v1/chat/completions"
 
     val systemPrompt = """
