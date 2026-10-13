@@ -6,78 +6,81 @@ import org.json.JSONObject
 
 class AssistantRepository(private val context: Context, apiKey: String) {
 
-    private val client = GeminiClient(apiKey)
+    private val client = GroqClient(apiKey)
 
     private val tools: JSONArray = JSONArray().apply {
-        put(JSONObject().apply {
-            put("functionDeclarations", JSONArray().apply {
-                put(functionDeclaration(
-                    name = "set_alarm",
-                    description = "Ставит будильник на телефоне на указанное время.",
-                    properties = JSONObject().apply {
-                        put("hour", JSONObject().apply {
-                            put("type", "integer")
-                            put("description", "Час в 24-часовом формате, от 0 до 23")
-                        })
-                        put("minute", JSONObject().apply {
-                            put("type", "integer")
-                            put("description", "Минуты, от 0 до 59")
-                        })
-                        put("label", JSONObject().apply {
-                            put("type", "string")
-                            put("description", "Необязательная подпись будильника, например 'тренировка'")
-                        })
-                    },
-                    required = JSONArray().put("hour").put("minute")
-                ))
-                put(functionDeclaration(
-                    name = "play_music",
-                    description = "Ищет и включает локальный музыкальный файл на телефоне по названию трека или исполнителю.",
-                    properties = JSONObject().apply {
-                        put("query", JSONObject().apply {
-                            put("type", "string")
-                            put("description", "Название трека, исполнитель или плейлист, который нужно включить")
-                        })
-                    },
-                    required = JSONArray().put("query")
-                ))
-            })
-        })
+        put(functionTool(
+            name = "set_alarm",
+            description = "Ставит будильник на телефоне на указанное время.",
+            properties = JSONObject().apply {
+                put("hour", JSONObject().apply {
+                    put("type", "integer")
+                    put("description", "Час в 24-часовом формате, от 0 до 23")
+                })
+                put("minute", JSONObject().apply {
+                    put("type", "integer")
+                    put("description", "Минуты, от 0 до 59")
+                })
+                put("label", JSONObject().apply {
+                    put("type", "string")
+                    put("description", "Необязательная подпись будильника, например 'тренировка'")
+                })
+            },
+            required = JSONArray().put("hour").put("minute")
+        ))
+        put(functionTool(
+            name = "play_music",
+            description = "Ищет и включает локальный музыкальный файл на телефоне по названию трека или исполнителю.",
+            properties = JSONObject().apply {
+                put("query", JSONObject().apply {
+                    put("type", "string")
+                    put("description", "Название трека, исполнитель или плейлист, который нужно включить")
+                })
+            },
+            required = JSONArray().put("query")
+        ))
     }
 
-    private fun functionDeclaration(
+    private fun functionTool(
         name: String,
         description: String,
         properties: JSONObject,
         required: JSONArray
     ): JSONObject = JSONObject().apply {
-        put("name", name)
-        put("description", description)
-        put("parameters", JSONObject().apply {
-            put("type", "object")
-            put("properties", properties)
-            put("required", required)
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", name)
+            put("description", description)
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", properties)
+                put("required", required)
+            })
         })
     }
 
     suspend fun handle(prompt: String): String {
         return try {
-            val contents = JSONArray().apply {
+            val messages = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", client.systemPrompt)
+                })
                 put(JSONObject().apply {
                     put("role", "user")
-                    put("parts", JSONArray().put(JSONObject().put("text", prompt)))
+                    put("content", prompt)
                 })
             }
-            when (val result = client.sendConversation(contents, tools)) {
-                is GeminiResult.FinalText -> result.text
-                is GeminiResult.FunctionCall -> executeAndRespond(contents, result)
+            when (val result = client.sendConversation(messages, tools)) {
+                is GroqResult.FinalText -> result.text
+                is GroqResult.FunctionCall -> executeAndRespond(messages, result)
             }
         } catch (e: Exception) {
             "Ошибка: ${e.message}"
         }
     }
 
-    private suspend fun executeAndRespond(contents: JSONArray, call: GeminiResult.FunctionCall): String {
+    private suspend fun executeAndRespond(messages: JSONArray, call: GroqResult.FunctionCall): String {
         val actionResult: String = when (call.name) {
             "set_alarm" -> {
                 val hour = call.arguments.optInt("hour", 0)
@@ -92,21 +95,18 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             else -> "Неизвестная функция: ${call.name}"
         }
 
-        contents.put(call.modelContent)
+        messages.put(call.assistantMessage)
 
-        contents.put(JSONObject().apply {
-            put("role", "user")
-            put("parts", JSONArray().put(JSONObject().apply {
-                put("functionResponse", JSONObject().apply {
-                    put("name", call.name)
-                    put("response", JSONObject().put("status", actionResult))
-                })
-            }))
+        messages.put(JSONObject().apply {
+            put("role", "tool")
+            put("tool_call_id", call.toolCallId)
+            put("name", call.name)
+            put("content", actionResult)
         })
 
-        return when (val finalResponse = client.sendConversation(contents, tools)) {
-            is GeminiResult.FinalText -> finalResponse.text
-            is GeminiResult.FunctionCall -> actionResult
+        return when (val finalResponse = client.sendConversation(messages, tools)) {
+            is GroqResult.FinalText -> finalResponse.text
+            is GroqResult.FunctionCall -> actionResult
         }
     }
 }
