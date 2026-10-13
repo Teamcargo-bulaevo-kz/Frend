@@ -15,10 +15,9 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Ключ приходит из переменной окружения GEMINI_API_KEY
+                // Ключ приходит из переменной окружения GROQ_API_KEY
         // (в GitHub Actions — из Secrets, локально — просто экспортируй её в терминале)
-        buildConfigField("String", "GEMINI_API_KEY", "\"${System.getenv("GEMINI_API_KEY") ?: ""}\"")
-    }
+        buildConfigField("String", "GROQ_API_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")    }
 
     buildTypes {
         release {
