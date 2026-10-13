@@ -8,7 +8,7 @@ import java.util.Locale
 /**
  * Связывает модель (GroqClient) с реальными действиями (PhoneActions, NoteActions):
  * описывает доступные функции, сначала проверяет локальный кэш выученных команд,
- * и только если фразы там нет — идёт в Groq.
+ * и только если фразы там нет — идёт в Groq с полной историей чата.
  */
 class AssistantRepository(private val context: Context, apiKey: String) {
 
@@ -120,15 +120,18 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         }
 
         return try {
+            val history = ChatHistory.load(context)
             val messages = JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
                     put("content", client.systemPrompt)
                 })
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", prompt)
-                })
+                for (m in history) {
+                    put(JSONObject().apply {
+                        put("role", if (m.role == "assistant") "assistant" else "user")
+                        put("content", m.text)
+                    })
+                }
             }
             when (val result = client.sendConversation(messages, tools)) {
                 is GroqResult.FinalText -> result.text
