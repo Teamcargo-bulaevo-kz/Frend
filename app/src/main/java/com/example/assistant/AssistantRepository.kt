@@ -108,10 +108,17 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     private fun normalize(text: String): String =
         text.trim().lowercase(Locale.getDefault())
 
+    /**
+     * В кэш попадают только действия, которые не зависят от контекста разговора.
+     * Заметки зависят от контекста ("запомни" после предыдущего сообщения), поэтому их
+     * всегда обрабатывает модель, которая видит всю историю чата.
+     */
+    private val cacheableFunctions = setOf("set_alarm", "play_music")
+
     /** Главная точка входа. Сначала смотрим в локальный кэш выученных команд. */
     suspend fun handle(prompt: String): String {
         val normalized = normalize(prompt)
-        val cached = patternDao.find(normalized)
+        val cached = patternDao.find(normalized)?.takeIf { it.functionName in cacheableFunctions }
         if (cached != null) {
             val args = try { JSONObject(cached.argumentsJson) } catch (e: Exception) { JSONObject() }
             val result = executeFunction(cached.functionName, args)
@@ -171,13 +178,15 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     ): String {
         val actionResult = executeFunctionSuspend(call.name, call.arguments)
 
-        patternDao.upsert(
-            CommandPatternEntity(
-                phrase = normalizedPhrase,
-                functionName = call.name,
-                argumentsJson = call.arguments.toString()
+        if (call.name in cacheableFunctions) {
+            patternDao.upsert(
+                CommandPatternEntity(
+                    phrase = normalizedPhrase,
+                    functionName = call.name,
+                    argumentsJson = call.arguments.toString()
+                )
             )
-        )
+        }
 
         messages.put(call.assistantMessage)
         messages.put(JSONObject().apply {
