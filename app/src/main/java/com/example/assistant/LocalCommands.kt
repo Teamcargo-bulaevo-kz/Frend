@@ -285,8 +285,8 @@ object LocalCommands {
     private val pauseRe = Regex("^${filler}(?:пауза|на паузу|поставь на паузу|поставь паузу|приостанови|приостанови$trackWord|останови на паузу)(?: пожалуйста)?$")
     private val stopRe = Regex("^${filler}(?:стоп|останови$trackWord|выключи$trackWordRequired|отключи$trackWordRequired|хватит|хватит музыки|вырубай$trackWordRequired)(?: пожалуйста)?$")
     private val resumeRe = Regex("^${filler}(?:продолжи|продолжай|возобнови|продолжить|играй|плей|снимите с паузы|сними с паузы|продолжи$trackWord|возобнови$trackWord)(?: пожалуйста)?$")
-    private val nextRe = Regex("^${filler}(?:(?:включи |переключи на )?следующ\\w+|дальше|переключи|пропусти|next|другую|другой|переключай)$trackWord(?: пожалуйста)?$")
-    private val prevRe = Regex("^${filler}(?:(?:включи |переключи на )?предыдущ\\w+|назад|прошлую|прошлый|вернись|верни|верни назад|включи прошлую)$trackWord(?: пожалуйста)?$")
+    private val nextRe = Regex("^${filler}(?:(?:включи |переключи на )?следующ\\p{L}+|дальше|переключи|пропусти|next|другую|другой|переключай)$trackWord(?: пожалуйста)?$")
+    private val prevRe = Regex("^${filler}(?:(?:включи |переключи на )?предыдущ\\p{L}+|назад|прошлую|прошлый|вернись|верни|верни назад|включи прошлую)$trackWord(?: пожалуйста)?$")
 
     private fun parsePlayerControl(t: String): LocalCommand? {
         val action = when {
