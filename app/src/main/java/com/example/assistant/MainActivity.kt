@@ -3,8 +3,11 @@ package com.example.assistant
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.widget.Button
 import android.widget.EditText
@@ -56,14 +59,13 @@ class MainActivity : AppCompatActivity() {
         repository = AssistantRepository(applicationContext, BuildConfig.GROQ_API_KEY)
 
         requestMediaPermissionIfNeeded()
+        AssistantService.start(this)
 
         input = findViewById(R.id.inputField)
         sendButton = findViewById(R.id.sendButton)
         micButton = findViewById(R.id.micButton)
         chatLog = findViewById(R.id.chatLogView)
         chatScroll = findViewById(R.id.chatScrollView)
-
-        loadHistory()
 
         sendButton.setOnClickListener {
             val prompt = input.text.toString().trim()
@@ -78,6 +80,15 @@ class MainActivity : AppCompatActivity() {
                 recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Чат читаем заново: за время, пока приложение было свёрнуто, могли прийти голосовые команды из шторки
+        chatLog.text = ""
+        loadHistory()
+        // Музыка, которую система ещё не знает (скачанное, из мессенджеров), добавляется в медиатеку
+        uiScope.launch(Dispatchers.IO) { MusicIndexer.scanNewFiles(applicationContext) }
     }
 
     private fun loadHistory() {
@@ -139,6 +150,29 @@ class MainActivity : AppCompatActivity() {
         }
         if (missing.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
+        } else {
+            askAllFilesAccessOnce()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) askAllFilesAccessOnce()
+    }
+
+    /** Один раз открывает настройки «Все файлы», чтобы ассистент видел файлы и всю музыку. */
+    private fun askAllFilesAccessOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()) return
+        val prefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
+        if (prefs.getBoolean("asked_all_files", false)) return
+        prefs.edit().putBoolean("asked_all_files", true).apply()
+        try {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
+            )
+            Toast.makeText(this, "Включи доступ ко всем файлам для Assistant и вернись назад", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            // нет такого экрана настроек — ассистент спросит позже, когда понадобится
         }
     }
 }

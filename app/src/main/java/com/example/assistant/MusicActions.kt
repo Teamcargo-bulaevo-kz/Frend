@@ -23,15 +23,39 @@ object MusicActions {
     // ---------------------------------------------------------------- воспроизведение
 
     fun playMusic(context: Context, query: String, shuffle: Boolean): String {
-        val found = MusicLibrary.search(context, query, limit = 100)
+        val index = MusicLibrary.index(context)
+        val blank = query.isBlank()
+        val found = if (blank) index.allMusic() else index.search(query, 100)
         if (found.isEmpty()) {
-            return if (query.isBlank()) NO_ACCESS else "Не нашёл на телефоне ничего похожего на «$query»"
+            return if (blank) NO_ACCESS else "Не нашёл на телефоне ничего похожего на «$query»"
         }
-        val tracks = if (shuffle) found.shuffled() else found
+        // «Включи музыку» без уточнений — вся музыка вперемешку (не больше 300 треков в очереди)
+        val tracks = if (shuffle || blank) found.shuffled().take(300) else found
         startPlayback(context, tracks)
         val first = tracks.first()
         val name = if (first.artist.isBlank()) first.title else "${first.artist} — ${first.title}"
         return if (tracks.size > 1) "Включаю «$name», дальше ещё ${tracks.size - 1}" else "Включаю «$name»"
+    }
+
+    /** Что есть в музыкальной библиотеке: сводка или результаты поиска по запросу. */
+    fun library(context: Context, query: String?): String {
+        val index = MusicLibrary.index(context)
+        val music = index.allMusic()
+        if (music.isEmpty()) return NO_ACCESS
+        val text = query?.trim().orEmpty()
+        if (text.isEmpty()) {
+            val artists = index.artists()
+            val top = artists.take(15).joinToString(", ") { "${it.first} (${it.second})" }
+            return "На телефоне ${music.size} треков, ${artists.size} исполнителей. Больше всего: $top"
+        }
+        val found = index.search(text, 200)
+        if (found.isEmpty()) return "Не нашёл на телефоне «$text»"
+        val byArtist = found.groupBy { it.artist.ifBlank { "Без исполнителя" } }
+        return byArtist.entries.take(5).joinToString("\n") { (artist, list) ->
+            val titles = list.take(8).joinToString(", ") { it.title }
+            val more = if (list.size > 8) " и ещё ${list.size - 8}" else ""
+            "• $artist — ${list.size} треков: $titles$more"
+        }
     }
 
     /** Управление плеером: наш плеер, а если он не играет — медиакнопки для любого другого. */

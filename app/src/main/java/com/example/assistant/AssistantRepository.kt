@@ -8,35 +8,51 @@ import org.json.JSONObject
 import java.util.Locale
 
 /**
- * Связывает модель (GroqClient) с реальными действиями (PhoneActions, NoteActions):
- * описывает доступные функции, сначала проверяет локальный кэш выученных команд,
- * и только если фразы там нет — идёт в Groq с полной историей чата.
+ * Связывает модель (GroqClient) с реальными действиями (PhoneActions, MusicActions, NoteActions...).
+ * Сначала пробует обойтись без модели (правила и выученные фразы), потом идёт в Groq.
  */
 class AssistantRepository(private val context: Context, apiKey: String) {
 
     private val client = GroqClient(apiKey)
     private val patternDao = NoteDatabase.getInstance(context).commandPatternDao()
-    private val tools: JSONArray = Tools.all
 
     private fun normalize(text: String): String =
         text.trim().lowercase(Locale.getDefault())
 
     /**
-     * В кэш попадают только действия, которые не зависят от контекста разговора и от текущего
-     * состояния. Заметки, плейлисты и поиск файлов зависят от них, поэтому их всегда
-     * обрабатывает модель, которая видит всю историю чата.
+     * В кэш выученных фраз попадают только действия, которые не зависят от контекста разговора
+     * и от текущего состояния. Заметки, плейлисты и поиск файлов зависят от них, поэтому их
+     * всегда обрабатывает модель, которая видит историю чата.
      */
     private val cacheableFunctions = setOf(
         "set_alarm", "play_music", "music_control", "set_volume", "flashlight", "open_camera",
         "take_screenshot", "open_app", "open_browser", "open_settings", "open_dialer"
     )
 
-    /** Сколько раз подряд модель может вызвать функции, прежде чем мы принудительно остановимся. */
-    private val maxToolRounds = 4
+    /** Сколько последних сообщений уходит в модель: для команд хватает немногих, для беседы нужно больше. */
+    private val commandHistory = 8
+    private val chatHistory = 24
 
-    /** Главная точка входа. Сначала смотрим в локальный кэш выученных команд. */
+    /**
+     * Три уровня, чтобы тратить меньше токенов:
+     * 1. Правила (LocalCommands) и выученные фразы: модель не участвует, 0 токенов.
+     * 2. Команда, которую правила не поняли: короткий запрос к модели (нужные функции, короткая
+     *    история), ответ модели выполняется как есть, без второго вызова.
+     * 3. Обычная беседа: длинная история и сжатый список функций.
+     */
     suspend fun handle(prompt: String): String {
         val normalized = normalize(prompt)
+
+        // Уровень 1: правила
+        LocalCommands.parse(prompt)?.let { command ->
+            runLocal(command)?.let { return it }
+        }
+        // «Включи Imagine Dragons»: если такое есть в музыке телефона, модель не нужна
+        LocalCommands.musicCandidate(prompt)?.let { query ->
+            val known = withContext(Dispatchers.IO) { MusicLibrary.index(context).search(query, 1).isNotEmpty() }
+            if (known) return execute("play_music", JSONObject().put("query", query).put("shuffle", false))
+        }
+        // Уровень 1: фразы, которым ассистент уже научился у модели
         val cached = patternDao.find(normalized)?.takeIf { it.functionName in cacheableFunctions }
         if (cached != null) {
             val args = try { JSONObject(cached.argumentsJson) } catch (e: Exception) { JSONObject() }
@@ -46,65 +62,68 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         }
 
         return try {
-            val history = ChatHistory.load(context)
-            val messages = JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", client.systemPrompt())
-                })
-                for (m in history) {
-                    put(JSONObject().apply {
-                        put("role", if (m.role == "assistant") "assistant" else "user")
-                        put("content", m.text)
-                    })
-                }
-            }
-            converse(messages, normalized)
+            askModel(prompt, normalized)
         } catch (e: Exception) {
             "Ошибка: ${e.message}"
         }
     }
 
-    /**
-     * Разговор с моделью: она может несколько раз подряд попросить выполнить функции
-     * (и несколько функций за раз), пока не вернёт обычный текст.
-     */
-    private suspend fun converse(messages: JSONArray, normalizedPhrase: String): String {
-        var lastResults = ""
-        for (round in 1..maxToolRounds) {
-            when (val result = client.sendConversation(messages, tools)) {
-                is GroqResult.FinalText -> return result.text
-                is GroqResult.FunctionCalls -> {
-                    messages.put(result.assistantMessage)
-                    val outputs = mutableListOf<String>()
-                    for (call in result.calls) {
-                        val output = execute(call.name, call.arguments)
-                        outputs += output
-                        messages.put(JSONObject().apply {
-                            put("role", "tool")
-                            put("tool_call_id", call.id)
-                            put("name", call.name)
-                            put("content", output)
-                        })
-                    }
-                    lastResults = outputs.joinToString("\n")
+    private suspend fun runLocal(command: LocalCommand): String? {
+        if (command.name == "say") return command.args["text"] as? String
+        val args = JSONObject()
+        for ((key, value) in command.args) args.put(key, value)
+        val result = execute(command.name, args)
+        // Приложение не нашлось по названию: пусть разберётся модель (она знает, как оно называется на значке)
+        if (command.name == "open_app" && result.startsWith("Не нашёл")) return null
+        return result
+    }
 
-                    // Запоминаем фразу только если это было одно простое действие
-                    val only = result.calls.singleOrNull()
-                    if (round == 1 && only != null && only.name in cacheableFunctions) {
-                        patternDao.upsert(
-                            CommandPatternEntity(
-                                phrase = normalizedPhrase,
-                                functionName = only.name,
-                                argumentsJson = only.arguments.toString()
-                            )
-                        )
-                    }
-                }
+    /** Уровни 2 и 3: запрос к модели. */
+    private suspend fun askModel(prompt: String, normalizedPhrase: String): String {
+        val history = ChatHistory.load(context)
+        val recent = history.takeLast(4).map { it.text }
+        val groups = Tools.groupsFor(listOf(prompt) + recent)
+        val commandMode = groups.isNotEmpty()
+
+        val window = if (commandMode) commandHistory else chatHistory
+        val messages = JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "system")
+                put("content", client.systemPrompt())
+            })
+            for (m in history.takeLast(window)) {
+                put(JSONObject().apply {
+                    put("role", if (m.role == "assistant") "assistant" else "user")
+                    put("content", m.text)
+                })
             }
         }
-        // Модель так и не дала текстовый ответ: показываем результаты действий как есть
-        return lastResults.ifBlank { "Не удалось получить ответ от модели" }
+        val tools = if (commandMode) Tools.subset(groups) else Tools.compact
+
+        return when (val result = client.sendConversation(
+            messages, tools,
+            effort = if (commandMode) "low" else "medium",
+            maxTokens = if (commandMode) 1024 else 2048
+        )) {
+            is GroqResult.FinalText -> result.text
+            is GroqResult.FunctionCalls -> {
+                val outputs = result.calls.map { execute(it.name, it.arguments) }
+
+                // Запоминаем фразу только если это было одно простое действие
+                val only = result.calls.singleOrNull()
+                if (only != null && only.name in cacheableFunctions) {
+                    patternDao.upsert(
+                        CommandPatternEntity(
+                            phrase = normalizedPhrase,
+                            functionName = only.name,
+                            argumentsJson = only.arguments.toString()
+                        )
+                    )
+                }
+                // Результат функций уже написан по-человечески: показываем его как есть
+                outputs.joinToString("\n")
+            }
+        }
     }
 
     // ---------------------------------------------------------------- выполнение функций
@@ -150,6 +169,9 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "set_volume" -> MusicActions.setVolume(
                 context, a.optString("action", ""), a.optIntOrNull("percent"), a.optStringOrNull("stream")
             )
+            "music_library" -> withContext(Dispatchers.IO) {
+                MusicActions.library(context, a.optStringOrNull("query"))
+            }
             "playlist" -> withContext(Dispatchers.IO) {
                 MusicActions.playlist(
                     context, a.optString("action", ""), a.optStringOrNull("name"),

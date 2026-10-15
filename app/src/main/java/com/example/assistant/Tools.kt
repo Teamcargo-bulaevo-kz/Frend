@@ -92,6 +92,13 @@ object Tools {
                 listOf("action")
             ))
 
+            put(tool(
+                "music_library",
+                "Показывает, какая музыка есть на телефоне: общая сводка или поиск по исполнителю или названию. " +
+                    "Используй, когда спрашивают, есть ли песня или исполнитель, или что есть из музыки.",
+                listOf("query" to text("Исполнитель или название. Пусто — общая сводка"))
+            ))
+
             // --- заметки
             put(tool(
                 "create_note", "Сохраняет новую текстовую заметку.",
@@ -182,6 +189,90 @@ object Tools {
                     "open" to flag("true — открыть первый найденный файл")
                 )
             ))
+        }
+    }
+
+    // ---------------------------------------------------------------- наборы функций для экономии токенов
+
+    private val groups: Map<String, List<String>> = mapOf(
+        "alarm" to listOf("set_alarm"),
+        "music" to listOf("play_music", "music_control", "set_volume", "playlist", "music_library"),
+        "notes" to listOf("create_note", "list_notes", "search_notes", "delete_note"),
+        "phone" to listOf(
+            "flashlight", "open_camera", "take_screenshot", "open_app", "open_browser",
+            "open_settings", "open_dialer", "open_whatsapp"
+        ),
+        "files" to listOf("find_media", "find_files")
+    )
+
+    /** Признаки (начала слов) в тексте, по которым понятно, какие функции могут понадобиться. */
+    private val groupKeys: Map<String, List<String>> = mapOf(
+        "alarm" to listOf("будильник", "разбуд", "заведи"),
+        "music" to listOf(
+            "музык", "песн", "трек", "плейлист", "громк", "тише", "громче", "потише", "погромче", "пауз",
+            "дальше", "следующ", "предыдущ", "играй", "альбом", "исполнител", "групп", "звук", "артист"
+        ),
+        "notes" to listOf("заметк", "запомн", "запиш", "сохран", "удал"),
+        "phone" to listOf(
+            "фонар", "камер", "скрин", "открой", "откр", "запусти", "запуск", "настройк", "wifi", "вайфай",
+            "блютуз", "bluetooth", "браузер", "сайт", "интернет", "гугл", "ватсап", "whatsapp", "вацап",
+            "позвони", "набери", "номер", "приложени", "сообщени", "напиши", "отправ", "фото", "видео"
+        ),
+        "files" to listOf(
+            "файл", "папк", "загрузк", "документ", "фото", "видео", "галере", "снимок", "скачан", "картинк", "изображен"
+        )
+    )
+
+    private val byName: Map<String, JSONObject> by lazy {
+        val map = LinkedHashMap<String, JSONObject>()
+        for (i in 0 until all.length()) {
+            val tool = all.getJSONObject(i)
+            map[tool.getJSONObject("function").getString("name")] = tool
+        }
+        map
+    }
+
+    /** Какие группы функций упоминаются в текстах (текущая фраза и недавний контекст). */
+    fun groupsFor(texts: List<String>): Set<String> {
+        val words = texts.flatMap { TextMatch.normalize(it).split(' ') }.filter { it.isNotEmpty() }
+        return groupKeys.filter { (_, keys) -> words.any { w -> keys.any { w.startsWith(it) } } }.keys
+    }
+
+    /** Только функции из указанных групп (с полными описаниями). */
+    fun subset(groupNames: Set<String>): JSONArray {
+        val names = groupNames.flatMap { groups[it].orEmpty() }.toSet()
+        return JSONArray().apply { byName.forEach { (name, tool) -> if (name in names) put(tool) } }
+    }
+
+    /** Все функции в сжатом виде: первое предложение описания и без описаний параметров. */
+    val compact: JSONArray by lazy {
+        JSONArray().apply {
+            for (tool in byName.values) {
+                val function = tool.getJSONObject("function")
+                val params = function.getJSONObject("parameters")
+                val props = JSONObject()
+                val source = params.getJSONObject("properties")
+                for (key in source.keys()) {
+                    val original = source.getJSONObject(key)
+                    props.put(key, JSONObject().apply {
+                        put("type", original.getString("type"))
+                        if (original.has("enum")) put("enum", original.getJSONArray("enum"))
+                        if (original.has("items")) put("items", original.getJSONObject("items"))
+                    })
+                }
+                put(JSONObject().apply {
+                    put("type", "function")
+                    put("function", JSONObject().apply {
+                        put("name", function.getString("name"))
+                        put("description", function.getString("description").substringBefore(". ").take(120))
+                        put("parameters", JSONObject().apply {
+                            put("type", "object")
+                            put("properties", props)
+                            put("required", params.getJSONArray("required"))
+                        })
+                    })
+                })
+            }
         }
     }
 }

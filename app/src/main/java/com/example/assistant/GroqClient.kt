@@ -27,6 +27,8 @@ sealed class GroqResult {
     data class FinalText(val text: String) : GroqResult()
 }
 
+class GroqApiException(val code: Int, body: String) : Exception("Groq API error $code: $body")
+
 class GroqClient(private val apiKey: String) {
 
     private val client = OkHttpClient.Builder()
@@ -36,37 +38,46 @@ class GroqClient(private val apiKey: String) {
     private val model = "openai/gpt-oss-120b"
     private val endpoint = "https://api.groq.com/openai/v1/chat/completions"
 
-    /** Системный промпт собирается при каждом запросе, чтобы модель знала текущее время. */
+    /** Короткий системный промпт (экономит токены). Собирается при каждом запросе, чтобы модель знала время. */
     fun systemPrompt(): String {
         val now = SimpleDateFormat("dd.MM.yyyy HH:mm, EEEE", Locale("ru")).format(Date())
-        val zone = TimeZone.getDefault().id
-        return """
-            Ты — личный голосовой помощник на телефоне Максима.
-            Отвечай по-русски, кратко и по делу, без лишних вступлений.
-            Сейчас: $now (часовой пояс $zone). Используй это для будильников вроде "через полчаса" или "завтра в 7".
-
-            Ты видишь всю историю этого разговора. Короткие просьбы вроде "запомни" или "а в метрах?" относятся к предыдущим сообщениям — используй их как контекст и не переспрашивай то, что уже было сказано.
-
-            Что ты умеешь через функции: будильник, музыка (включить, пауза, дальше, назад, громкость, плейлисты), заметки (создать, показать, найти, удалить), фонарик, камера, скриншот, открыть приложение или сайт или настройки, набор номера, WhatsApp, поиск фото, видео и файлов.
-            Если просьба требует одного из этих действий — вызывай функцию. Если несколько действий сразу, вызывай все нужные функции. Если действие не требуется — просто отвечай текстом.
-
-            Правила:
-            - Результат функции — главный источник правды. Не говори, что действие выполнено, если функция вернула ошибку или просьбу что-то включить вручную.
-            - Ты не можешь сам нажимать кнопки в других приложениях: камеру, звонок и отправку сообщения WhatsApp пользователь запускает сам. Не обещай обратного.
-            - Если просят то, чего нет в списке выше (включить Wi-Fi, позвонить сразу, написать контакту по имени), честно скажи об этом и предложи ближайшее действие.
-        """.trimIndent()
+        return "Ты голосовой помощник на телефоне Максима. Отвечай по-русски, кратко. Сейчас: $now (${TimeZone.getDefault().id}). " +
+            "Действия выполняй вызовом функций (можно несколько сразу), на обычные вопросы отвечай текстом. " +
+            "Короткие просьбы вроде «запомни» или «а в метрах?» относятся к предыдущим сообщениям: не переспрашивай то, что уже сказано. " +
+            "Результат функции — единственный источник правды: не говори, что действие выполнено, если функция вернула ошибку. " +
+            "Камеру, звонок и отправку сообщения WhatsApp пользователь запускает сам. " +
+            "Чего нет в функциях (например, включить Wi-Fi или позвонить контакту по имени), сделать нельзя: скажи об этом и предложи ближайшее действие."
     }
 
-    suspend fun sendConversation(messages: JSONArray, tools: JSONArray): GroqResult =
-        withContext(Dispatchers.IO) {
-            val body = JSONObject().apply {
-                put("model", model)
-                put("messages", messages)
+    /**
+     * effort — глубина рассуждения модели ("low" для команд, "medium" для беседы), maxTokens — лимит ответа.
+     * Если API не принял эти необязательные параметры (ошибка 400), запрос повторяется без них.
+     */
+    suspend fun sendConversation(
+        messages: JSONArray,
+        tools: JSONArray?,
+        effort: String? = null,
+        maxTokens: Int? = null
+    ): GroqResult = withContext(Dispatchers.IO) {
+        fun body(withExtras: Boolean) = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            if (tools != null && tools.length() > 0) {
                 put("tools", tools)
                 put("tool_choice", "auto")
             }
-            parseResponse(execute(body))
+            if (withExtras) {
+                if (effort != null) put("reasoning_effort", effort)
+                if (maxTokens != null) put("max_completion_tokens", maxTokens)
+            }
         }
+        val extras = effort != null || maxTokens != null
+        try {
+            parseResponse(execute(body(extras)))
+        } catch (e: GroqApiException) {
+            if (extras && e.code == 400) parseResponse(execute(body(false))) else throw e
+        }
+    }
 
     private fun execute(body: JSONObject): JSONObject {
         val requestBody = body.toString().toRequestBody("application/json".toMediaType())
@@ -79,7 +90,7 @@ class GroqClient(private val apiKey: String) {
         client.newCall(request).execute().use { resp ->
             val raw = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                throw IllegalStateException("Groq API error ${resp.code}: $raw")
+                throw GroqApiException(resp.code, raw)
             }
             return JSONObject(raw)
         }

@@ -2,14 +2,23 @@ package com.example.assistant
 
 import android.content.ContentUris
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 
-data class MusicTrack(val id: Long, val title: String, val artist: String) {
+data class MusicTrack(
+    val id: Long,
+    val title: String,
+    val artist: String,
+    val album: String = "",
+    val isMusic: Boolean = true
+) {
     val uri: Uri
         get() = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
 }
@@ -19,69 +28,137 @@ object MusicQueue {
     @Volatile var tracks: List<MusicTrack> = emptyList()
 }
 
-/** Поиск музыки на телефоне через MediaStore. Блокирующий: вызывать с IO-потока. */
+/** Вся музыка телефона, загруженная в память. Блокирующий: вызывать с IO-потока. */
 object MusicLibrary {
 
-    /**
-     * Ищет треки по названию, исполнителю или альбому. Пустой запрос — вся музыка.
-     * Точные совпадения названия идут первыми.
-     */
-    fun search(context: Context, query: String, limit: Int = 50): List<MusicTrack> {
-        val text = query.trim()
+    private const val CACHE_MS = 5 * 60 * 1000L
+
+    @Volatile private var index: MusicIndex? = null
+    @Volatile private var loadedAt = 0L
+
+    /** Индекс музыки. Обновляется не чаще раза в 5 минут (или сразу, если force). */
+    @Synchronized
+    fun index(context: Context, force: Boolean = false): MusicIndex {
+        val cached = index
+        if (!force && cached != null && System.currentTimeMillis() - loadedAt < CACHE_MS) return cached
+        val fresh = MusicIndex(load(context))
+        index = fresh
+        loadedAt = System.currentTimeMillis()
+        return fresh
+    }
+
+    fun invalidate() {
+        loadedAt = 0L
+    }
+
+    fun search(context: Context, query: String, limit: Int = 50): List<MusicTrack> =
+        index(context).search(query, limit)
+
+    private fun load(context: Context): List<MusicTrack> {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
-            MediaStore.Audio.Media.ARTIST
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.IS_MUSIC
         )
-        val base = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
-        val selection: String
-        val args: Array<String>?
-        if (text.isEmpty()) {
-            selection = base
-            args = null
-        } else {
-            selection = "$base AND (${MediaStore.Audio.Media.TITLE} LIKE ? OR " +
-                "${MediaStore.Audio.Media.ARTIST} LIKE ? OR ${MediaStore.Audio.Media.ALBUM} LIKE ?)"
-            val like = "%$text%"
-            args = arrayOf(like, like, like)
-        }
-
-        val found = mutableListOf<MusicTrack>()
+        // Музыка, а также любое длинное аудио (альбомы без тегов, скачанное из мессенджеров).
+        // Рингтоны, будильники и уведомления не берём.
+        val selection = "(${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.DURATION} >= 120000) " +
+            "AND ${MediaStore.Audio.Media.IS_RINGTONE} = 0 " +
+            "AND ${MediaStore.Audio.Media.IS_NOTIFICATION} = 0 " +
+            "AND ${MediaStore.Audio.Media.IS_ALARM} = 0"
+        val result = mutableListOf<MusicTrack>()
         try {
             context.contentResolver.query(
-                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, projection, selection, args,
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, projection, selection, null,
                 "${MediaStore.Audio.Media.ARTIST} ASC, ${MediaStore.Audio.Media.TITLE} ASC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                 val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val musicCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.IS_MUSIC)
                 while (cursor.moveToNext()) {
-                    found += MusicTrack(
+                    val artist = cursor.getString(artistCol).orEmpty()
+                    result += MusicTrack(
                         id = cursor.getLong(idCol),
                         title = cursor.getString(titleCol) ?: "Без названия",
-                        artist = cursor.getString(artistCol) ?: ""
+                        artist = if (artist == "<unknown>") "" else artist,
+                        album = cursor.getString(albumCol).orEmpty(),
+                        isMusic = cursor.getInt(musicCol) != 0
                     )
                 }
             }
         } catch (e: SecurityException) {
-            return emptyList()
+            // нет доступа к аудио — вернём пустой список
         }
+        return result
+    }
+}
 
-        val lower = text.lowercase(Locale.getDefault())
-        val ranked = if (lower.isEmpty()) {
-            found
-        } else {
-            found.sortedBy { track ->
-                val title = track.title.lowercase(Locale.getDefault())
-                when {
-                    title == lower -> 0
-                    title.startsWith(lower) -> 1
-                    title.contains(lower) -> 2
-                    else -> 3
-                }
+/**
+ * Находит аудиофайлы, которые система ещё не добавила в медиатеку (скачанные, из мессенджеров,
+ * с флешки), и просит систему их проиндексировать. Нужен доступ «Все файлы».
+ */
+object MusicIndexer {
+
+    private val extensions = setOf("mp3", "m4a", "flac", "ogg", "opus", "wav", "aac", "wma", "mka")
+    private const val PREFS = "music_indexer"
+    private const val KEY_LAST_SCAN = "last_scan"
+    private const val MIN_INTERVAL_MS = 12 * 60 * 60 * 1000L
+    private const val MAX_VISITED = 60000
+    private const val MAX_NEW_FILES = 5000
+
+    fun hasAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
+    /** Блокирующий. Возвращает число файлов, отправленных на индексацию. */
+    fun scanNewFiles(context: Context, force: Boolean = false): Int {
+        if (!hasAllFilesAccess()) return 0
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (!force && now - prefs.getLong(KEY_LAST_SCAN, 0L) < MIN_INTERVAL_MS) return 0
+
+        val known = knownPaths(context)
+        val root = Environment.getExternalStorageDirectory()
+        val androidDir = File(root, "Android")
+        val fresh = mutableListOf<String>()
+        var visited = 0
+        val tree = root.walkTopDown()
+            .maxDepth(8)
+            .onEnter { dir -> !dir.name.startsWith(".") && dir != androidDir }
+        for (file in tree) {
+            visited++
+            if (visited > MAX_VISITED || fresh.size >= MAX_NEW_FILES) break
+            if (file.isFile && file.extension.lowercase(Locale.ROOT) in extensions && file.path !in known) {
+                fresh += file.path
             }
         }
-        return ranked.take(limit)
+        prefs.edit().putLong(KEY_LAST_SCAN, now).apply()
+        if (fresh.isNotEmpty()) {
+            MediaScannerConnection.scanFile(context, fresh.toTypedArray(), null) { _, _ ->
+                MusicLibrary.invalidate()
+            }
+        }
+        return fresh.size
+    }
+
+    @Suppress("DEPRECATION")
+    private fun knownPaths(context: Context): Set<String> {
+        val paths = HashSet<String>()
+        try {
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Audio.Media.DATA), null, null, null
+            )?.use { cursor ->
+                val col = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                while (cursor.moveToNext()) cursor.getString(col)?.let { paths += it }
+            }
+        } catch (e: Exception) {
+            // не получилось прочитать — индексируем всё найденное
+        }
+        return paths
     }
 }
 

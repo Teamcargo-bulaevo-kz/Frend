@@ -172,6 +172,7 @@ object PhoneActions {
     /** Ищет установленное приложение по названию на значке и запускает его. */
     private fun openByLabel(context: Context, rawName: String): String {
         val name = rawName.trim().lowercase(Locale.getDefault())
+        val nameKey = TextMatch.key(name)
         val pm = context.packageManager
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
 
@@ -182,10 +183,12 @@ object PhoneActions {
         for (info in pm.queryIntentActivities(launcherIntent, 0)) {
             val label = info.loadLabel(pm).toString()
             val l = label.lowercase(Locale.getDefault())
+            val labelKey = TextMatch.key(label)
             val score = when {
-                l == name -> 3
+                l == name || (nameKey.length >= 3 && labelKey == nameKey) -> 3
                 l.startsWith(name) -> 2
                 l.contains(name) || (l.length >= 3 && name.contains(l)) -> 1
+                nameKey.length >= 4 && labelKey.contains(nameKey) -> 1
                 else -> 0
             }
             if (score > bestScore || (score == bestScore && score > 0 && label.length < bestLabel.length)) {
