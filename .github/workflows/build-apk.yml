@@ -25,7 +25,20 @@ jobs:
         run: gradle wrapper --gradle-version 8.7
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --console=plain
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          ./gradlew testDebugUnitTest --console=plain 2>&1 | tee gradle-test.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Report test problems
+        if: steps.tests.outcome == 'failure'
+        shell: bash
+        run: |
+          msg=$(grep -E "^e: |FAILED|Assertion|expected|Exception|error:|What went wrong" -A2 gradle-test.log | grep -v "^--" | head -80 | cut -c1-400 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Unit tests failed::$msg"
+          exit 1
 
       - name: Build debug APK
         env:
