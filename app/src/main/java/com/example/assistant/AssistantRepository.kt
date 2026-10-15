@@ -1,6 +1,8 @@
 package com.example.assistant
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -14,106 +16,23 @@ class AssistantRepository(private val context: Context, apiKey: String) {
 
     private val client = GroqClient(apiKey)
     private val patternDao = NoteDatabase.getInstance(context).commandPatternDao()
-
-    private val tools: JSONArray = JSONArray().apply {
-        put(functionTool(
-            name = "set_alarm",
-            description = "Ставит будильник на телефоне на указанное время.",
-            properties = JSONObject().apply {
-                put("hour", JSONObject().apply {
-                    put("type", "integer")
-                    put("description", "Час в 24-часовом формате, от 0 до 23")
-                })
-                put("minute", JSONObject().apply {
-                    put("type", "integer")
-                    put("description", "Минуты, от 0 до 59")
-                })
-                put("label", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "Необязательная подпись будильника, например 'тренировка'")
-                })
-            },
-            required = JSONArray().put("hour").put("minute")
-        ))
-        put(functionTool(
-            name = "play_music",
-            description = "Ищет и включает локальный музыкальный файл на телефоне по названию трека или исполнителю.",
-            properties = JSONObject().apply {
-                put("query", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "Название трека, исполнитель или плейлист, который нужно включить")
-                })
-            },
-            required = JSONArray().put("query")
-        ))
-        put(functionTool(
-            name = "create_note",
-            description = "Сохраняет новую текстовую заметку.",
-            properties = JSONObject().apply {
-                put("text", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "Текст заметки, который нужно сохранить")
-                })
-            },
-            required = JSONArray().put("text")
-        ))
-        put(functionTool(
-            name = "list_notes",
-            description = "Показывает все сохранённые заметки.",
-            properties = JSONObject(),
-            required = JSONArray()
-        ))
-        put(functionTool(
-            name = "search_notes",
-            description = "Ищет заметки по тексту.",
-            properties = JSONObject().apply {
-                put("query", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "Текст или ключевое слово для поиска среди заметок")
-                })
-            },
-            required = JSONArray().put("query")
-        ))
-        put(functionTool(
-            name = "delete_note",
-            description = "Удаляет заметку (или несколько), которая подходит под поисковый запрос.",
-            properties = JSONObject().apply {
-                put("query", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "Текст или ключевое слово, по которому нужно найти и удалить заметку")
-                })
-            },
-            required = JSONArray().put("query")
-        ))
-    }
-
-    private fun functionTool(
-        name: String,
-        description: String,
-        properties: JSONObject,
-        required: JSONArray
-    ): JSONObject = JSONObject().apply {
-        put("type", "function")
-        put("function", JSONObject().apply {
-            put("name", name)
-            put("description", description)
-            put("parameters", JSONObject().apply {
-                put("type", "object")
-                put("properties", properties)
-                put("required", required)
-            })
-        })
-    }
+    private val tools: JSONArray = Tools.all
 
     private fun normalize(text: String): String =
         text.trim().lowercase(Locale.getDefault())
 
     /**
-     * В кэш попадают только действия, которые не зависят от контекста разговора.
-     * Заметки зависят от контекста ("запомни" после предыдущего сообщения), поэтому их
-     * всегда обрабатывает модель, которая видит всю историю чата.
+     * В кэш попадают только действия, которые не зависят от контекста разговора и от текущего
+     * состояния. Заметки, плейлисты и поиск файлов зависят от них, поэтому их всегда
+     * обрабатывает модель, которая видит всю историю чата.
      */
-    private val cacheableFunctions = setOf("set_alarm", "play_music")
+    private val cacheableFunctions = setOf(
+        "set_alarm", "play_music", "music_control", "set_volume", "flashlight", "open_camera",
+        "take_screenshot", "open_app", "open_browser", "open_settings", "open_dialer"
+    )
+
+    /** Сколько раз подряд модель может вызвать функции, прежде чем мы принудительно остановимся. */
+    private val maxToolRounds = 4
 
     /** Главная точка входа. Сначала смотрим в локальный кэш выученных команд. */
     suspend fun handle(prompt: String): String {
@@ -121,7 +40,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         val cached = patternDao.find(normalized)?.takeIf { it.functionName in cacheableFunctions }
         if (cached != null) {
             val args = try { JSONObject(cached.argumentsJson) } catch (e: Exception) { JSONObject() }
-            val result = executeFunction(cached.functionName, args)
+            val result = execute(cached.functionName, args)
             patternDao.upsert(cached.copy(useCount = cached.useCount + 1, lastUsed = System.currentTimeMillis()))
             return result
         }
@@ -131,7 +50,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             val messages = JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
-                    put("content", client.systemPrompt)
+                    put("content", client.systemPrompt())
                 })
                 for (m in history) {
                     put(JSONObject().apply {
@@ -140,65 +59,124 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                     })
                 }
             }
-            when (val result = client.sendConversation(messages, tools)) {
-                is GroqResult.FinalText -> result.text
-                is GroqResult.FunctionCall -> executeAndRespond(messages, normalized, result)
-            }
+            converse(messages, normalized)
         } catch (e: Exception) {
             "Ошибка: ${e.message}"
         }
     }
 
-    private fun executeFunction(name: String, arguments: JSONObject): String = when (name) {
-        "set_alarm" -> {
-            val hour = arguments.optInt("hour", 0)
-            val minute = arguments.optInt("minute", 0)
-            val label = if (arguments.has("label")) arguments.optString("label") else null
-            PhoneActions.setAlarm(context, hour, minute, label)
+    /**
+     * Разговор с моделью: она может несколько раз подряд попросить выполнить функции
+     * (и несколько функций за раз), пока не вернёт обычный текст.
+     */
+    private suspend fun converse(messages: JSONArray, normalizedPhrase: String): String {
+        var lastResults = ""
+        for (round in 1..maxToolRounds) {
+            when (val result = client.sendConversation(messages, tools)) {
+                is GroqResult.FinalText -> return result.text
+                is GroqResult.FunctionCalls -> {
+                    messages.put(result.assistantMessage)
+                    val outputs = mutableListOf<String>()
+                    for (call in result.calls) {
+                        val output = execute(call.name, call.arguments)
+                        outputs += output
+                        messages.put(JSONObject().apply {
+                            put("role", "tool")
+                            put("tool_call_id", call.id)
+                            put("name", call.name)
+                            put("content", output)
+                        })
+                    }
+                    lastResults = outputs.joinToString("\n")
+
+                    // Запоминаем фразу только если это было одно простое действие
+                    val only = result.calls.singleOrNull()
+                    if (round == 1 && only != null && only.name in cacheableFunctions) {
+                        patternDao.upsert(
+                            CommandPatternEntity(
+                                phrase = normalizedPhrase,
+                                functionName = only.name,
+                                argumentsJson = only.arguments.toString()
+                            )
+                        )
+                    }
+                }
+            }
         }
-        "play_music" -> {
-            val query = arguments.optString("query", "")
-            PhoneActions.playMusic(context, query)
-        }
-        else -> "Неизвестная функция: $name"
+        // Модель так и не дала текстовый ответ: показываем результаты действий как есть
+        return lastResults.ifBlank { "Не удалось получить ответ от модели" }
     }
 
-    private suspend fun executeFunctionSuspend(name: String, arguments: JSONObject): String = when (name) {
-        "create_note" -> NoteActions.createNote(context, arguments.optString("text", ""))
-        "list_notes" -> NoteActions.listNotes(context)
-        "search_notes" -> NoteActions.searchNotes(context, arguments.optString("query", ""))
-        "delete_note" -> NoteActions.deleteNote(context, arguments.optString("query", ""))
-        else -> executeFunction(name, arguments)
+    // ---------------------------------------------------------------- выполнение функций
+
+    private fun JSONObject.optStringOrNull(key: String): String? =
+        if (has(key) && !isNull(key)) optString(key).takeIf { it.isNotBlank() } else null
+
+    private fun JSONObject.optIntOrNull(key: String): Int? =
+        if (has(key) && !isNull(key)) optInt(key, Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE } else null
+
+    /** Список строк из аргумента: массив или одна строка. */
+    private fun JSONObject.optStringList(key: String): List<String> {
+        val array = optJSONArray(key)
+        if (array != null) {
+            return (0 until array.length()).map { array.optString(it) }.filter { it.isNotBlank() }
+        }
+        return optStringOrNull(key)?.let { listOf(it) } ?: emptyList()
     }
 
-    private suspend fun executeAndRespond(
-        messages: JSONArray,
-        normalizedPhrase: String,
-        call: GroqResult.FunctionCall
-    ): String {
-        val actionResult = executeFunctionSuspend(call.name, call.arguments)
-
-        if (call.name in cacheableFunctions) {
-            patternDao.upsert(
-                CommandPatternEntity(
-                    phrase = normalizedPhrase,
-                    functionName = call.name,
-                    argumentsJson = call.arguments.toString()
-                )
+    /** Выполняет одну функцию. Никогда не бросает исключений: ошибка возвращается текстом. */
+    private suspend fun execute(name: String, a: JSONObject): String = try {
+        when (name) {
+            "set_alarm" -> PhoneActions.setAlarm(
+                context, a.optInt("hour", 0), a.optInt("minute", 0), a.optStringOrNull("label")
             )
-        }
+            "flashlight" -> PhoneActions.setFlashlight(context, a.optBoolean("on", true))
+            "open_camera" -> PhoneActions.openCamera(context, a.optStringOrNull("mode"))
+            "take_screenshot" -> PhoneActions.takeScreenshot(context)
+            "open_app" -> PhoneActions.openApp(context, a.optString("name", ""))
+            "open_browser" -> PhoneActions.openBrowser(
+                context, a.optStringOrNull("url"), a.optStringOrNull("search_query")
+            )
+            "open_settings" -> PhoneActions.openSettings(context, a.optStringOrNull("section"))
+            "open_dialer" -> PhoneActions.openDialer(context, a.optStringOrNull("number"))
+            "open_whatsapp" -> PhoneActions.openWhatsApp(
+                context, a.optStringOrNull("phone"), a.optStringOrNull("message")
+            )
 
-        messages.put(call.assistantMessage)
-        messages.put(JSONObject().apply {
-            put("role", "tool")
-            put("tool_call_id", call.toolCallId)
-            put("name", call.name)
-            put("content", actionResult)
-        })
+            "play_music" -> withContext(Dispatchers.IO) {
+                MusicActions.playMusic(context, a.optString("query", ""), a.optBoolean("shuffle", false))
+            }
+            "music_control" -> MusicActions.control(context, a.optString("action", ""))
+            "set_volume" -> MusicActions.setVolume(
+                context, a.optString("action", ""), a.optIntOrNull("percent"), a.optStringOrNull("stream")
+            )
+            "playlist" -> withContext(Dispatchers.IO) {
+                MusicActions.playlist(
+                    context, a.optString("action", ""), a.optStringOrNull("name"),
+                    a.optStringList("queries"), a.optBoolean("shuffle", false)
+                )
+            }
 
-        return when (val finalResponse = client.sendConversation(messages, tools)) {
-            is GroqResult.FinalText -> finalResponse.text
-            is GroqResult.FunctionCall -> actionResult
+            "find_media" -> withContext(Dispatchers.IO) {
+                MediaActions.findMedia(
+                    context, a.optString("kind", "photo"), a.optStringOrNull("query"),
+                    a.optInt("limit", 5), a.optBoolean("open", false)
+                )
+            }
+            "find_files" -> withContext(Dispatchers.IO) {
+                MediaActions.findFiles(
+                    context, a.optStringOrNull("query"), a.optStringOrNull("folder"),
+                    a.optInt("limit", 10), a.optBoolean("open", false)
+                )
+            }
+
+            "create_note" -> NoteActions.createNote(context, a.optString("text", ""))
+            "list_notes" -> NoteActions.listNotes(context)
+            "search_notes" -> NoteActions.searchNotes(context, a.optString("query", ""))
+            "delete_note" -> NoteActions.deleteNote(context, a.optString("query", ""))
+            else -> "Неизвестная функция: $name"
         }
+    } catch (e: Exception) {
+        "Не получилось выполнить «$name»: ${e.message}"
     }
 }

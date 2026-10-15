@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">Нужна только для того, чтобы ассистент мог по вашей команде сделать скриншот. Содержимое экрана служба не читает.</string>
+</resources>
