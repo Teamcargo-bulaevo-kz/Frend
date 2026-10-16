@@ -161,6 +161,29 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         return optStringOrNull(key)?.let { listOf(it) } ?: emptyList()
     }
 
+    private fun sharedFolder(a: JSONObject): String = when (a.optString("action", "list")) {
+        "read" -> SharedFolder.read(context, a.optString("name", ""), a.optStringOrNull("query"))
+        "sql" -> SharedFolder.sql(a.optString("name", ""), a.optString("sql", ""))
+        "write" -> SharedFolder.write(a.optString("name", ""), a.optString("content", ""), a.optBoolean("append", false))
+        "merge" -> SharedFolder.merge(a.optStringList("names"), a.optStringOrNull("output"), a.optBoolean("dedupe", false))
+        "convert" -> SharedFolder.convert(a.optString("name", ""), a.optStringOrNull("output"))
+        else -> SharedFolder.list(context, a.optStringOrNull("folder"))
+    }
+
+    /** Распознаёт текст на картинке из общей папки моделью с «зрением». */
+    private suspend fun recognizeImage(name: String?, task: String?, saveAs: String?): String {
+        val file = withContext(Dispatchers.IO) { SharedFolder.imageFile(name) }
+            ?: return "Не нашёл картинку. Положи её во Входящие или прикрепи в чате кнопкой 📎."
+        val encoded = withContext(Dispatchers.IO) { ImageUtil.jpegBase64(file) }
+            ?: return "Не смог открыть «${file.name}»."
+        val prompt = (task?.takeIf { it.isNotBlank() } ?: "Перепиши весь текст с изображения точно, как он написан.") +
+            " Отвечай только результатом, без пояснений."
+        val text = client.vision(encoded, prompt)
+        if (saveAs.isNullOrBlank()) return text
+        val saved = withContext(Dispatchers.IO) { SharedFolder.saveRecognized(saveAs, text) }
+        return "$saved\n\n" + text.take(600)
+    }
+
     /** Выполняет одну функцию. Никогда не бросает исключений: ошибка возвращается текстом. */
     private suspend fun execute(name: String, a: JSONObject): String = try {
         when (name) {
@@ -210,13 +233,31 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 )
             }
 
-            "shared_folder" -> withContext(Dispatchers.IO) {
-                when (a.optString("action", "list")) {
-                    "read" -> SharedFolder.read(context, a.optString("name", ""), a.optStringOrNull("query"))
-                    "sql" -> SharedFolder.sql(a.optString("name", ""), a.optString("sql", ""))
-                    "write" -> SharedFolder.write(a.optString("name", ""), a.optString("content", ""), a.optBoolean("append", false))
-                    else -> SharedFolder.list(context, a.optStringOrNull("folder"))
-                }
+            "shared_folder" -> when (a.optString("action", "list")) {
+                "ocr" -> recognizeImage(a.optStringOrNull("name"), a.optStringOrNull("task"), a.optStringOrNull("save_as"))
+                else -> withContext(Dispatchers.IO) { sharedFolder(a) }
+            }
+
+            "call_contact" -> withContext(Dispatchers.IO) { ContactActions.call(context, a.optString("name", "")) }
+            "message_contact" -> withContext(Dispatchers.IO) {
+                ContactActions.message(context, a.optString("name", ""), a.optStringOrNull("text"), a.optStringOrNull("app"))
+            }
+            "find_contact" -> withContext(Dispatchers.IO) { ContactActions.info(context, a.optString("name", "")) }
+
+            "set_timer" -> ReminderActions.setTimer(context, a.optInt("seconds", 0), a.optStringOrNull("label"))
+            "set_reminder" -> ReminderActions.setReminder(
+                context, a.optString("text", ""), a.optIntOrNull("in_minutes"), a.optStringOrNull("date"), a.optStringOrNull("time")
+            )
+            "list_reminders" -> ReminderActions.list(context)
+            "cancel_reminder" -> ReminderActions.cancel(context, a.optStringOrNull("query"))
+            "calendar_add" -> withContext(Dispatchers.IO) {
+                CalendarActions.add(
+                    context, a.optString("title", ""), a.optStringOrNull("date"), a.optStringOrNull("time"),
+                    a.optIntOrNull("duration_minutes"), a.optStringOrNull("description")
+                )
+            }
+            "calendar_list" -> withContext(Dispatchers.IO) {
+                CalendarActions.list(context, a.optStringOrNull("date"), a.optIntOrNull("days"))
             }
 
             "create_note" -> NoteActions.createNote(context, a.optString("text", ""))

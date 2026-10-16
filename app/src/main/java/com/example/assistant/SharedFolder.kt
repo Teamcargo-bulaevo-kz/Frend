@@ -31,6 +31,7 @@ object SharedFolder {
         "txt", "md", "csv", "tsv", "json", "xml", "html", "htm", "log", "sql", "ini", "yml", "yaml",
         "kt", "java", "py", "js", "css", "conf", "properties", "rtf", "srt", "vcf", "ics", "gpx"
     )
+    val imageExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp", "heic")
     private val databaseExtensions = setOf("db", "sqlite", "sqlite3", "db3")
 
     private val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
@@ -118,9 +119,12 @@ object SharedFolder {
         val ext = file.extension.lowercase()
         return when {
             ext in databaseExtensions -> describeDatabase(file)
+            ext == "xlsx" -> readString(file, tableToText(readTable(file).orEmpty()), query, headerFirst = true)
+            ext == "docx" -> readString(file, FileConvert.docxText(file), query, headerFirst = false)
             ext in textExtensions || looksLikeText(file) -> readText(file, query)
+            ext in imageExtensions -> "«${file.name}» — картинка. Могу распознать текст на ней (скажи: «распознай текст на ${file.name}»)."
             else -> "«${file.name}» (${Formatter.formatShortFileSize(context, file.length())}): этот формат читать не умею. " +
-                "Сохрани его как csv, txt или json, и я разберу."
+                "Сохрани его как csv, txt, json или xlsx, и я разберу."
         }
     }
 
@@ -152,6 +156,105 @@ object SharedFolder {
         val head = header?.takeIf { file.extension.lowercase() in setOf("csv", "tsv") }?.let { "Заголовок: ${it.take(300)}\n" }.orEmpty()
         val more = if (total > hits.size) "\n… и ещё ${total - hits.size}" else ""
         return "«${file.name}», найдено строк: $total\n$head${hits.joinToString("\n")}$more".take(MAX_READ_CHARS)
+    }
+
+    private fun tableToText(rows: List<List<String>>) = rows.joinToString("\n") { it.joinToString(" | ") }
+
+    /** Текст, который уже в памяти (из xlsx, docx): то же начало файла или строки со словом. */
+    private fun readString(file: File, text: String, query: String?, headerFirst: Boolean): String {
+        if (text.isBlank()) return "«${file.name}» пустой или не содержит текста."
+        if (query.isNullOrBlank()) {
+            val tail = if (text.length > MAX_READ_CHARS) "\n… (показано начало; чтобы найти нужное, назови слово для поиска)" else ""
+            return "«${file.name}»:\n${text.take(MAX_READ_CHARS)}$tail"
+        }
+        val needle = TextMatch.normalize(query)
+        val lines = text.lines()
+        val hits = lines.withIndex().filter { TextMatch.normalize(it.value).contains(needle) }
+        if (hits.isEmpty()) return "В «${file.name}» не нашёл «$query»."
+        val head = if (headerFirst) "Заголовок: ${lines.first().take(300)}\n" else ""
+        val more = if (hits.size > 40) "\n… и ещё ${hits.size - 40}" else ""
+        return ("«${file.name}», найдено строк: ${hits.size}\n$head" +
+            hits.take(40).joinToString("\n") { "${it.index + 1}: ${it.value.take(300)}" } + more).take(MAX_READ_CHARS)
+    }
+
+    /** Таблица из csv, tsv или xlsx. */
+    fun readTable(file: File): List<List<String>>? = when (file.extension.lowercase()) {
+        "xlsx" -> try { FileConvert.xlsxRows(file) } catch (e: Exception) { null }
+        "csv", "tsv", "txt" -> try { FileConvert.parseCsv(file.readText()) } catch (e: Exception) { null }
+        else -> null
+    }
+
+    // ---------------------------------------------------------------- слияние и конвертация
+
+    private fun outputName(requested: String?, fallback: String, ext: String): String {
+        val base = requested?.trim()?.substringAfterLast('/')?.ifEmpty { null } ?: fallback
+        return if (base.contains('.')) base else "$base.$ext"
+    }
+
+    private fun saveCsv(name: String, rows: List<List<String>>): String {
+        val target = File(outbox(), name.replace(Regex("[\\\\:*?\"<>|]"), "_"))
+        target.writeText("\uFEFF" + FileConvert.toCsv(rows))
+        return "$NAME/$OUTBOX/${target.name}"
+    }
+
+    /** Склеивает несколько таблиц (csv, xlsx) в один csv в Исходящих. */
+    fun merge(names: List<String>, output: String?, dedupe: Boolean): String {
+        if (!ensure()) return NO_ACCESS
+        if (names.size < 2) return "Назови минимум два файла для объединения."
+        val tables = ArrayList<List<List<String>>>()
+        for (n in names) {
+            val f = find(n) ?: return notFound(n)
+            tables.add(readTable(f) ?: return "«${f.name}» не таблица (нужен csv или xlsx).")
+        }
+        val rows = FileConvert.merge(tables, dedupe)
+        return try {
+            val path = saveCsv(outputName(output, "объединённое.csv", "csv"), rows)
+            "Объединил ${names.size} файла, строк с заголовком: ${rows.size}. Сохранил в $path"
+        } catch (e: Exception) {
+            "Не получилось сохранить: ${e.message}"
+        }
+    }
+
+    /** xlsx превращает в csv, docx в txt (результат в Исходящих). */
+    fun convert(name: String, output: String?): String {
+        if (!ensure()) return NO_ACCESS
+        val f = find(name) ?: return notFound(name)
+        return try {
+            when (f.extension.lowercase()) {
+                "xlsx" -> "Готово: " + saveCsv(outputName(output, f.nameWithoutExtension + ".csv", "csv"), FileConvert.xlsxRows(f))
+                "docx" -> {
+                    val target = File(outbox(), outputName(output, f.nameWithoutExtension + ".txt", "txt"))
+                    target.writeText(FileConvert.docxText(f))
+                    "Готово: $NAME/$OUTBOX/${target.name}"
+                }
+                else -> "Конвертирую только xlsx в csv и docx в txt."
+            }
+        } catch (e: Exception) {
+            "Не получилось: ${e.message}"
+        }
+    }
+
+    // ---------------------------------------------------------------- картинки
+
+    /** Картинка по имени; без имени — самая свежая во Входящих. */
+    fun imageFile(name: String?): File? {
+        if (!ensure()) return null
+        if (!name.isNullOrBlank()) return find(name)?.takeIf { it.extension.lowercase() in imageExtensions }
+        return inbox().listFiles()?.filter { it.isFile && it.extension.lowercase() in imageExtensions }?.maxByOrNull { it.lastModified() }
+    }
+
+    /** Сохраняет распознанный текст в Исходящие: таблицу как csv, остальное как txt. */
+    fun saveRecognized(name: String, text: String): String {
+        if (!ensure()) return NO_ACCESS
+        return try {
+            if (name.endsWith(".csv", ignoreCase = true)) {
+                "Сохранил в " + saveCsv(name, FileConvert.parseCsv(text))
+            } else {
+                write(name, text, append = false)
+            }
+        } catch (e: Exception) {
+            "Не получилось сохранить: ${e.message}"
+        }
     }
 
     private fun looksLikeText(file: File): Boolean {

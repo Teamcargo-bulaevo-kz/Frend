@@ -45,8 +45,8 @@ class GroqClient(private val apiKey: String) {
             "Действия выполняй вызовом функций (можно несколько сразу), на обычные вопросы отвечай текстом. " +
             "Короткие просьбы вроде «запомни» или «а в метрах?» относятся к предыдущим сообщениям: не переспрашивай то, что уже сказано. " +
             "Результат функции — единственный источник правды: не говори, что действие выполнено, если функция вернула ошибку. " +
-            "Камеру, звонок и отправку сообщения WhatsApp пользователь запускает сам. " +
-            "Чего нет в функциях (например, включить Wi-Fi или позвонить контакту по имени), сделать нельзя: скажи об этом и предложи ближайшее действие."
+            "Камеру и отправку сообщения WhatsApp пользователь запускает сам. " +
+            "Чего нет в функциях (например, включить Wi-Fi), сделать нельзя: скажи об этом и предложи ближайшее действие."
     }
 
     /**
@@ -77,6 +77,34 @@ class GroqClient(private val apiKey: String) {
         } catch (e: GroqApiException) {
             if (extras && e.code == 400) parseResponse(execute(body(false))) else throw e
         }
+    }
+
+    /** Модели Groq, которые понимают картинки. Если первая недоступна, пробуем следующую. */
+    private val visionModels = listOf("qwen/qwen3.8-27b", "meta-llama/llama-4-scout-17b-16e-instruct")
+
+    /** Распознаёт картинку (JPEG в base64) по заданию, например «перепиши весь текст». */
+    suspend fun vision(imageBase64: String, task: String): String = withContext(Dispatchers.IO) {
+        var last: Exception? = null
+        for (visionModel in visionModels) {
+            try {
+                val content = JSONArray()
+                    .put(JSONObject().put("type", "text").put("text", task))
+                    .put(JSONObject().put("type", "image_url").put("image_url",
+                        JSONObject().put("url", "data:image/jpeg;base64,$imageBase64")))
+                val body = JSONObject().apply {
+                    put("model", visionModel)
+                    put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+                    put("temperature", 0)
+                    put("max_completion_tokens", 3000)
+                }
+                val message = execute(body).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                val text = message?.optString("content", "").orEmpty().trim()
+                if (text.isNotEmpty()) return@withContext text
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        throw last ?: IllegalStateException("Модель не вернула текст")
     }
 
     private fun execute(body: JSONObject): JSONObject {

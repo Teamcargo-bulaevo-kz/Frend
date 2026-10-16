@@ -191,19 +191,96 @@ object Tools {
             ))
             put(tool(
                 "shared_folder",
-                "Общая папка Assistant, куда пользователь кладёт файлы и базы данных (Входящие), а ассистент сохраняет свои файлы (Исходящие). " +
-                    "list — что лежит в папке; read — прочитать файл (с query только строки со словом; для базы sqlite покажет таблицы); " +
-                    "sql — запрос SELECT к базе sqlite (только чтение); write — сохранить текст в Исходящие.",
+                "Общая папка Assistant: пользователь кладёт файлы и базы во Входящие, ассистент сохраняет результаты в Исходящие. " +
+                    "list — что в папке; read — прочитать файл (txt, csv, json, xlsx, docx; с query только строки со словом; для базы sqlite покажет таблицы); " +
+                    "sql — запрос SELECT к базе sqlite (только чтение); write — сохранить текст в Исходящие; " +
+                    "merge — объединить таблицы csv/xlsx из names в один csv (dedupe — без повторов); " +
+                    "convert — xlsx в csv или docx в txt; " +
+                    "ocr — распознать текст или таблицу на картинке (task — что сделать, save_as — имя файла для результата, csv для таблицы).",
                 listOf(
-                    "action" to choice("Действие", listOf("list", "read", "sql", "write")),
-                    "name" to text("Имя файла (для read, sql, write)"),
+                    "action" to choice("Действие", listOf("list", "read", "sql", "write", "merge", "convert", "ocr")),
+                    "name" to text("Имя файла (для read, sql, write, convert, ocr; для ocr без имени берётся последняя картинка)"),
+                    "names" to list("merge: имена объединяемых файлов"),
+                    "output" to text("merge, convert: имя результата"),
+                    "dedupe" to flag("merge: true — убрать одинаковые строки"),
                     "query" to text("read: слово или фраза для поиска по строкам файла"),
                     "sql" to text("sql: один запрос SELECT"),
                     "content" to text("write: текст файла"),
                     "append" to flag("write: true — дописать в конец, а не заменить"),
-                    "folder" to text("list: Входящие, Исходящие или вложенная папка")
+                    "folder" to text("list: Входящие, Исходящие или вложенная папка"),
+                    "task" to text("ocr: что сделать с картинкой, например «перепиши весь текст» или «выпиши таблицу в формате csv»"),
+                    "save_as" to text("ocr: сохранить результат в Исходящие под этим именем")
                 ),
                 listOf("action")
+            ))
+
+            // --- контакты
+            put(tool(
+                "call_contact",
+                "Звонит контакту из телефонной книги по имени (имя можно в любом падеже: «маме», «Ивану»).",
+                listOf("name" to text("Имя контакта")),
+                listOf("name")
+            ))
+            put(tool(
+                "message_contact",
+                "Готовит сообщение контакту по имени в WhatsApp (по умолчанию) или SMS. Отправляет сам пользователь.",
+                listOf(
+                    "name" to text("Имя контакта"),
+                    "text" to text("Текст сообщения"),
+                    "app" to choice("whatsapp или sms", listOf("whatsapp", "sms"))
+                ),
+                listOf("name")
+            ))
+            put(tool(
+                "find_contact",
+                "Показывает номера телефонов контакта по имени.",
+                listOf("name" to text("Имя контакта")),
+                listOf("name")
+            ))
+
+            // --- таймер, напоминания, календарь
+            put(tool(
+                "set_timer",
+                "Запускает таймер обратного отсчёта.",
+                listOf("seconds" to number("Длительность в секундах"), "label" to text("Название таймера")),
+                listOf("seconds")
+            ))
+            put(tool(
+                "set_reminder",
+                "Ставит напоминание с уведомлением. Укажи либо in_minutes (через сколько минут), либо time (и date, если не сегодня).",
+                listOf(
+                    "text" to text("О чём напомнить"),
+                    "in_minutes" to number("Через сколько минут"),
+                    "date" to text("Дата yyyy-MM-dd, если не сегодня"),
+                    "time" to text("Время HH:mm")
+                ),
+                listOf("text")
+            ))
+            put(tool("list_reminders", "Показывает запланированные напоминания."))
+            put(tool(
+                "cancel_reminder",
+                "Отменяет напоминание, в тексте которого есть query; «все» отменяет все.",
+                listOf("query" to text("Часть текста напоминания или «все»"))
+            ))
+            put(tool(
+                "calendar_add",
+                "Добавляет событие в календарь телефона. Без time событие на весь день.",
+                listOf(
+                    "title" to text("Название события"),
+                    "date" to text("Дата yyyy-MM-dd (вычисли по текущей дате)"),
+                    "time" to text("Время начала HH:mm"),
+                    "duration_minutes" to number("Длительность в минутах, по умолчанию 60"),
+                    "description" to text("Описание")
+                ),
+                listOf("title", "date")
+            ))
+            put(tool(
+                "calendar_list",
+                "Показывает события календаря за день или несколько дней.",
+                listOf(
+                    "date" to text("Дата yyyy-MM-dd, по умолчанию сегодня"),
+                    "days" to number("Сколько дней показать, по умолчанию 1")
+                )
             ))
         }
     }
@@ -219,7 +296,10 @@ object Tools {
             "open_settings", "open_dialer", "open_whatsapp"
         ),
         "files" to listOf("find_media", "find_files"),
-        "shared" to listOf("shared_folder")
+        "shared" to listOf("shared_folder"),
+        "contacts" to listOf("call_contact", "message_contact", "find_contact"),
+        "time" to listOf("set_timer", "set_reminder", "list_reminders", "cancel_reminder"),
+        "calendar" to listOf("calendar_add", "calendar_list")
     )
 
     /** Признаки (начала слов) в тексте, по которым понятно, какие функции могут понадобиться. */
@@ -239,8 +319,14 @@ object Tools {
             "файл", "папк", "загрузк", "документ", "фото", "видео", "галере", "снимок", "скачан", "картинк", "изображен"
         ),
         "shared" to listOf(
-            "файл", "папк", "баз", "таблиц", "csv", "sqlite", "входящ", "исходящ", "прочита", "строк", "экспорт", "excel", "json"
-        )
+            "файл", "папк", "баз", "таблиц", "csv", "sqlite", "входящ", "исходящ", "прочита", "строк", "экспорт", "excel", "json",
+            "xlsx", "docx", "объедин", "склей", "сведи", "распозна", "картинк", "изображен", "фото", "скан", "конвертир", "переведи в"
+        ),
+        "contacts" to listOf(
+            "позвони", "звон", "контакт", "напиши", "сообщени", "смс", "sms", "ватсап", "whatsapp", "вацап", "номер", "телефон"
+        ),
+        "time" to listOf("таймер", "напомни", "напомин", "отмени", "отмен"),
+        "calendar" to listOf("календар", "встреч", "событи", "запланир", "расписан", "завтра", "послезавтра", "недел")
     )
 
     private val byName: Map<String, JSONObject> by lazy {
