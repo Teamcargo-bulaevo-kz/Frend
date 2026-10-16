@@ -36,8 +36,8 @@ jobs:
         if: steps.tests.outcome == 'failure'
         shell: bash
         run: |
-          msg=$(grep -E "^e: |FAILED|Assertion|expected|Exception|error:|What went wrong" -A2 gradle-test.log | grep -v "^--" | head -80 | cut -c1-400 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
-          fails=$(grep -h "<failure" app/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | cut -c1-500 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          msg=$(grep -E "^e: |FAILED|Assertion|expected|Exception|error:|What went wrong" -A2 gradle-test.log | grep -v "^--" | head -80 | cut -c1-400 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g') || true
+          fails=$(grep -h "<failure" app/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | cut -c1-500 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g') || true
           echo "::error title=Unit tests failed::$msg%0A%0A$fails"
           exit 1
 
