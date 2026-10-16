@@ -263,7 +263,7 @@ object SharedFolder {
     }
 
     private fun notFound(name: String): String {
-        val names = (inbox().listFiles().orEmpty() + outbox().listFiles().orEmpty())
+        val names = (inbox().listFiles().orEmpty().toList() + outbox().listFiles().orEmpty().toList())
             .filter { it.isFile }.take(10).joinToString(", ") { it.name }
         return "Файл «$name» не нашёл. " + if (names.isEmpty()) "В папке пока пусто." else "Есть: $names"
     }
