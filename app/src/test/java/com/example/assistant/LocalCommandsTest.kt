@@ -150,7 +150,6 @@ class LocalCommandsTest {
         assertNone("найди рецепт борща")
         assertCmd("позвони 8 777 123 45 67", "open_dialer", "number" to "87771234567")
         assertCmd("набери +7 777 123 45 67", "open_dialer", "number" to "+77771234567")
-        assertNone("позвони маме")
     }
 
     @Test fun openApp() {

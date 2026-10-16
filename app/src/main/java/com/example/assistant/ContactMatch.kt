@@ -10,12 +10,12 @@ object ContactMatch {
     fun tokenMatches(query: String, name: String): Boolean {
         if (query == name) return true
         val shortest = minOf(query.length, name.length)
-        if (shortest >= 4) {
-            var p = 0
-            while (p < shortest && query[p] == name[p]) p++
-            // «ивану» ~ «иван», «маме» ~ «мама», но «марину» !~ «мария»
-            if (p >= maxOf(3, shortest - 1)) return true
-        }
+        var p = 0
+        while (p < shortest && query[p] == name[p]) p++
+        // Одно слово — начало другого («ивану» ~ «иван», «брату» ~ «брат»)
+        if (shortest >= 3 && p == shortest && maxOf(query.length, name.length) - shortest <= 3) return true
+        // Одинаковая длина, отличается только окончание («маме» ~ «мама»), но «марину» !~ «мария»
+        if (shortest >= 4 && query.length == name.length && p >= shortest - 1) return true
         // Имя в телефоне латиницей, а сказали по-русски (и наоборот)
         val a = TextMatch.key(query)
         val b = TextMatch.key(name)
