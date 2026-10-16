@@ -37,10 +37,10 @@ class WakeWordService : Service() {
         private const val KEY = "wake_word"
         private const val COMMAND_WINDOW_MS = 10_000L
 
-        fun enabled(context: Context) = context.getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY, false)
+        fun enabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
 
         fun setEnabled(context: Context, value: Boolean) {
-            context.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY, value).apply()
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, value).apply()
             if (value) start(context) else context.stopService(Intent(context, WakeWordService::class.java))
         }
 
@@ -55,21 +55,6 @@ class WakeWordService : Service() {
             } catch (e: Exception) {
                 // Android не разрешил запуск из фона — запустится при следующем открытии приложения
             }
-        }
-
-        /** Слово из запроса похоже на «Джарвис» (распознавание пишет по-разному). */
-        internal fun isWakeWord(word: String): Boolean {
-            val w = TextMatch.normalize(word)
-            return w.startsWith("джарв") || w.startsWith("жарв") || w.startsWith("джерв") || w.startsWith("чарв") ||
-                w.startsWith("jarv") || w == "джарвис" || w.startsWith("гарвис") || w.startsWith("джаврис")
-        }
-
-        /** Если в тексте есть «Джарвис», возвращает команду после него (может быть пустой), иначе null. */
-        internal fun commandAfterWakeWord(text: String): String? {
-            val words = TextMatch.normalize(text).split(' ').filter { it.isNotEmpty() }
-            val i = words.indexOfFirst { isWakeWord(it) }
-            if (i < 0) return null
-            return words.drop(i + 1).joinToString(" ")
         }
     }
 
@@ -168,7 +153,7 @@ class WakeWordService : Service() {
 
         // «Джарвис, включи музыку» или просто «Джарвис»
         for (t in texts) {
-            val command = commandAfterWakeWord(t) ?: continue
+            val command = WakeWord.commandAfter(t) ?: continue
             if (command.isNotBlank()) run(command) else {
                 awaitingUntil = System.currentTimeMillis() + COMMAND_WINDOW_MS
                 Speaker.speak(this, "Слушаю")
@@ -187,7 +172,6 @@ class WakeWordService : Service() {
     private fun run(command: String) {
         AssistantRunner.process(this, command) { answer ->
             AssistantService.showResult(applicationContext, command, answer)
-            Speaker.speak(applicationContext, answer)
             restart(2500)
         }
     }

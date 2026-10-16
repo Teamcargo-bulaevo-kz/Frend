@@ -11,7 +11,9 @@ import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.view.View
 import android.widget.ArrayAdapter
+import android.provider.OpenableColumns
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ListView
@@ -28,6 +30,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -53,6 +56,19 @@ class MainActivity : AppCompatActivity() {
                 sendPrompt(recognized)
             }
         }
+    }
+
+    private val wakePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        findViewById<CheckBox>(R.id.wakeCheck).isChecked = granted
+        if (granted) {
+            WakeWordService.setEnabled(this, true)
+        } else {
+            Toast.makeText(this, "Без микрофона слово «Джарвис» не работает", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val attachLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) attachFile(uri)
     }
 
     private val recordAudioPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -82,6 +98,25 @@ class MainActivity : AppCompatActivity() {
 
         messageList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         messageList.adapter = adapter
+
+        findViewById<ImageButton>(R.id.attachButton).setOnClickListener { attachLauncher.launch("*/*") }
+
+        val speakCheck = findViewById<CheckBox>(R.id.speakCheck)
+        speakCheck.isChecked = Speaker.enabled(this)
+        speakCheck.setOnCheckedChangeListener { _, checked -> Speaker.setEnabled(this, checked) }
+
+        val wakeCheck = findViewById<CheckBox>(R.id.wakeCheck)
+        wakeCheck.isChecked = WakeWordService.enabled(this) && WakeWordService.hasMicPermission(this)
+        wakeCheck.setOnCheckedChangeListener { button, checked ->
+            if (!button.isPressed) return@setOnCheckedChangeListener
+            if (!checked) {
+                WakeWordService.setEnabled(this, false)
+            } else if (WakeWordService.hasMicPermission(this)) {
+                WakeWordService.setEnabled(this, true)
+            } else {
+                wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
 
         findViewById<ImageButton>(R.id.menuButton).setOnClickListener {
             refreshChatList()
@@ -120,6 +155,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         // Чат читаем заново: за время, пока приложение было свёрнуто, могли прийти голосовые команды из шторки
         showCurrentChat()
+        WakeWordService.start(this)
         uiScope.launch(Dispatchers.IO) {
             // Музыка, которую система ещё не знает (скачанное, из мессенджеров), добавляется в медиатеку
             MusicIndexer.scanNewFiles(applicationContext)
@@ -216,6 +252,7 @@ class MainActivity : AppCompatActivity() {
         uiScope.launch {
             val answer = repository.handle(prompt)
             ChatHistory.append(applicationContext, "assistant", answer, chatId)
+            if (Speaker.enabled(applicationContext)) Speaker.speak(applicationContext, answer)
             adapter.add(ChatMessage("assistant", answer, System.currentTimeMillis()))
             scrollToEnd()
             busy = false
@@ -237,6 +274,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Копирует выбранный файл во Входящие общей папки, чтобы с ним можно было работать. */
+    private fun attachFile(uri: Uri) {
+        uiScope.launch {
+            val message = withContext(Dispatchers.IO) {
+                if (!SharedFolder.ensure()) {
+                    return@withContext "Нет доступа ко всем файлам, поэтому некуда сохранить. Разреши его для Assistant в настройках."
+                }
+                try {
+                    var name = "файл"
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) c.getString(0)?.let { name = it }
+                    }
+                    name = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                    var target = java.io.File(SharedFolder.inbox(), name)
+                    var n = 1
+                    while (target.exists()) {
+                        target = java.io.File(SharedFolder.inbox(), "${target.nameWithoutExtension.replace(Regex(" \\(\\d+\\)$"), "")} ($n).${target.extension}".removeSuffix("."))
+                        n++
+                    }
+                    contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                        ?: return@withContext "Не получилось открыть файл."
+                    SharedFolder.markSeen(applicationContext, target)
+                    val hint = if (target.extension.lowercase() in SharedFolder.imageExtensions) {
+                        "Напиши, что сделать: например «распознай текст на ${target.name}»."
+                    } else {
+                        "Скажи, что с ним сделать."
+                    }
+                    "Добавил «${target.name}» во Входящие. $hint"
+                } catch (e: Exception) {
+                    "Не получилось добавить файл: ${e.message}"
+                }
+            }
+            ChatHistory.append(applicationContext, "assistant", message)
+            adapter.add(ChatMessage("assistant", message, System.currentTimeMillis()))
+            scrollToEnd()
+        }
+    }
+
     private fun requestMediaPermissionIfNeeded() {
         val wanted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(
@@ -248,7 +323,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
-        val missing = wanted.filter {
+        val extra = arrayOf(
+            Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR
+        )
+        val missing = (wanted + extra).filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {

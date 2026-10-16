@@ -85,6 +85,14 @@ object SharedFolder {
         return fresh.sortedBy { it.lastModified() }
     }
 
+    /** Файл добавлен самим приложением: о нём в чате «новый файл» говорить не нужно. */
+    fun markSeen(context: Context, f: File) {
+        val prefs = context.getSharedPreferences("assistant_prefs", Context.MODE_PRIVATE)
+        val seen = prefs.getStringSet("shared_seen", emptySet()).orEmpty().toMutableSet()
+        seen.add(fileKey(f))
+        prefs.edit().putStringSet("shared_seen", seen).apply()
+    }
+
     private fun fileKey(f: File) = "${f.name}|${f.lastModified()}|${f.length()}"
 
     // ---------------------------------------------------------------- список

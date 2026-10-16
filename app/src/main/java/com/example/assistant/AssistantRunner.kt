@@ -25,6 +25,8 @@ object AssistantRunner {
                 "Ошибка: ${e.message}"
             }
             ChatHistory.append(app, "assistant", answer, chatId)
+            // Голосовая команда вне экрана чата: отвечаем голосом
+            Speaker.speak(app, answer)
             onDone(answer)
         }
     }
