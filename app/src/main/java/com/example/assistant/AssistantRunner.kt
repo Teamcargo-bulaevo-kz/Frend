@@ -16,14 +16,15 @@ object AssistantRunner {
 
     fun process(context: Context, text: String, onDone: (String) -> Unit) {
         val app = context.applicationContext
-        ChatHistory.append(app, "user", text)
+        val chatId = ChatHistory.currentId(app)
+        ChatHistory.append(app, "user", text, chatId)
         scope.launch {
             val answer = try {
                 AssistantRepository(app, BuildConfig.GROQ_API_KEY).handle(text)
             } catch (e: Exception) {
                 "Ошибка: ${e.message}"
             }
-            ChatHistory.append(app, "assistant", answer)
+            ChatHistory.append(app, "assistant", answer, chatId)
             onDone(answer)
         }
     }

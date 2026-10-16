@@ -189,6 +189,22 @@ object Tools {
                     "open" to flag("true — открыть первый найденный файл")
                 )
             ))
+            put(tool(
+                "shared_folder",
+                "Общая папка Assistant, куда пользователь кладёт файлы и базы данных (Входящие), а ассистент сохраняет свои файлы (Исходящие). " +
+                    "list — что лежит в папке; read — прочитать файл (с query только строки со словом; для базы sqlite покажет таблицы); " +
+                    "sql — запрос SELECT к базе sqlite (только чтение); write — сохранить текст в Исходящие.",
+                listOf(
+                    "action" to choice("Действие", listOf("list", "read", "sql", "write")),
+                    "name" to text("Имя файла (для read, sql, write)"),
+                    "query" to text("read: слово или фраза для поиска по строкам файла"),
+                    "sql" to text("sql: один запрос SELECT"),
+                    "content" to text("write: текст файла"),
+                    "append" to flag("write: true — дописать в конец, а не заменить"),
+                    "folder" to text("list: Входящие, Исходящие или вложенная папка")
+                ),
+                listOf("action")
+            ))
         }
     }
 
@@ -202,7 +218,8 @@ object Tools {
             "flashlight", "open_camera", "take_screenshot", "open_app", "open_browser",
             "open_settings", "open_dialer", "open_whatsapp"
         ),
-        "files" to listOf("find_media", "find_files")
+        "files" to listOf("find_media", "find_files"),
+        "shared" to listOf("shared_folder")
     )
 
     /** Признаки (начала слов) в тексте, по которым понятно, какие функции могут понадобиться. */
@@ -220,6 +237,9 @@ object Tools {
         ),
         "files" to listOf(
             "файл", "папк", "загрузк", "документ", "фото", "видео", "галере", "снимок", "скачан", "картинк", "изображен"
+        ),
+        "shared" to listOf(
+            "файл", "папк", "баз", "таблиц", "csv", "sqlite", "входящ", "исходящ", "прочита", "строк", "экспорт", "excel", "json"
         )
     )
 

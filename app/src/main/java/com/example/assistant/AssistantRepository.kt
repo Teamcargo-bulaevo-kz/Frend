@@ -120,6 +120,24 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                         )
                     )
                 }
+                // Содержимое файлов и баз модель должна осмыслить (найти, посчитать, пересказать): второй короткий вызов
+                val needsAnalysis = result.calls.any {
+                    it.name == "shared_folder" && it.arguments.optString("action") in setOf("read", "sql")
+                }
+                if (needsAnalysis) {
+                    val followUp = JSONArray()
+                    for (i in 0 until messages.length()) followUp.put(messages.get(i))
+                    followUp.put(result.assistantMessage)
+                    result.calls.forEachIndexed { i, call ->
+                        followUp.put(JSONObject().apply {
+                            put("role", "tool")
+                            put("tool_call_id", call.id)
+                            put("content", outputs[i])
+                        })
+                    }
+                    val second = client.sendConversation(followUp, null, effort = "low", maxTokens = 1024)
+                    if (second is GroqResult.FinalText && second.text.isNotBlank()) return second.text
+                }
                 // Результат функций уже написан по-человечески: показываем его как есть
                 outputs.joinToString("\n")
             }
@@ -190,6 +208,15 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                     context, a.optStringOrNull("query"), a.optStringOrNull("folder"),
                     a.optInt("limit", 10), a.optBoolean("open", false)
                 )
+            }
+
+            "shared_folder" -> withContext(Dispatchers.IO) {
+                when (a.optString("action", "list")) {
+                    "read" -> SharedFolder.read(context, a.optString("name", ""), a.optStringOrNull("query"))
+                    "sql" -> SharedFolder.sql(a.optString("name", ""), a.optString("sql", ""))
+                    "write" -> SharedFolder.write(a.optString("name", ""), a.optString("content", ""), a.optBoolean("append", false))
+                    else -> SharedFolder.list(context, a.optStringOrNull("folder"))
+                }
             }
 
             "create_note" -> NoteActions.createNote(context, a.optString("text", ""))

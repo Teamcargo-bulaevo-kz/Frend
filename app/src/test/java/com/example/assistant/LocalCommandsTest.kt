@@ -194,4 +194,19 @@ class LocalCommandsTest {
         assertNone("включи фонарик и поставь будильник на 7")
         assertNone("")
     }
+
+    // ---------------------------------------------------------------- общая папка
+
+    @Test fun sharedFolderList() {
+        assertCmd("что во входящих", "shared_folder", "action" to "list", "folder" to "Входящие")
+        assertCmd("покажи входящие", "shared_folder", "action" to "list", "folder" to "Входящие")
+        assertCmd("что в исходящих", "shared_folder", "action" to "list", "folder" to "Исходящие")
+        assertCmd("покажи общую папку", "shared_folder", "action" to "list", "folder" to "все")
+    }
+
+    @Test fun sharedFolderReadGoesToModel() {
+        assertNone("прочитай файл clients.csv")
+        assertNone("найди в базе Иванова")
+        assertNone("открой clients.csv")
+    }
 }

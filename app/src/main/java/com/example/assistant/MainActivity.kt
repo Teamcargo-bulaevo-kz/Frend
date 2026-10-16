@@ -9,12 +9,18 @@ import android.os.Environment
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.RecognizerIntent
+import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.ScrollView
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.drawerlayout.widget.DrawerLayout
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -31,8 +37,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var input: EditText
     private lateinit var sendButton: Button
     private lateinit var micButton: ImageButton
-    private lateinit var chatLog: TextView
-    private lateinit var chatScroll: ScrollView
+    private lateinit var drawer: DrawerLayout
+    private lateinit var chatTitle: TextView
+    private lateinit var messageList: RecyclerView
+    private lateinit var chatsListView: ListView
+    private val adapter = MessageAdapter()
+    private var chats: List<ChatInfo> = emptyList()
+    private var busy = false
 
     private val voiceLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) {
@@ -64,8 +75,31 @@ class MainActivity : AppCompatActivity() {
         input = findViewById(R.id.inputField)
         sendButton = findViewById(R.id.sendButton)
         micButton = findViewById(R.id.micButton)
-        chatLog = findViewById(R.id.chatLogView)
-        chatScroll = findViewById(R.id.chatScrollView)
+        drawer = findViewById(R.id.drawer)
+        chatTitle = findViewById(R.id.chatTitle)
+        messageList = findViewById(R.id.messageList)
+        chatsListView = findViewById(R.id.chatsListView)
+
+        messageList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+        messageList.adapter = adapter
+
+        findViewById<ImageButton>(R.id.menuButton).setOnClickListener {
+            refreshChatList()
+            drawer.openDrawer(android.view.Gravity.START)
+        }
+        findViewById<ImageButton>(R.id.newChatButton).setOnClickListener { startNewChat() }
+        findViewById<Button>(R.id.newChatDrawerButton).setOnClickListener { startNewChat() }
+
+        chatsListView.setOnItemClickListener { _, _, position, _ ->
+            if (blockedWhileBusy()) return@setOnItemClickListener
+            ChatHistory.select(applicationContext, chats[position].id)
+            drawer.closeDrawers()
+            showCurrentChat()
+        }
+        chatsListView.setOnItemLongClickListener { _, _, position, _ ->
+            confirmDelete(chats[position])
+            true
+        }
 
         sendButton.setOnClickListener {
             val prompt = input.text.toString().trim()
@@ -85,40 +119,109 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         // Чат читаем заново: за время, пока приложение было свёрнуто, могли прийти голосовые команды из шторки
-        chatLog.text = ""
-        loadHistory()
-        // Музыка, которую система ещё не знает (скачанное, из мессенджеров), добавляется в медиатеку
-        uiScope.launch(Dispatchers.IO) { MusicIndexer.scanNewFiles(applicationContext) }
-    }
-
-    private fun loadHistory() {
-        val history = ChatHistory.load(applicationContext)
-        for (m in history) {
-            appendToLog(m.role, m.text)
+        showCurrentChat()
+        uiScope.launch(Dispatchers.IO) {
+            // Музыка, которую система ещё не знает (скачанное, из мессенджеров), добавляется в медиатеку
+            MusicIndexer.scanNewFiles(applicationContext)
+            // Новые файлы в общей папке Assistant/Входящие: сообщаем в чате
+            val fresh = SharedFolder.takeNewFiles(applicationContext)
+            if (fresh.isNotEmpty()) {
+                val names = fresh.take(8).joinToString("\n") { "• ${it.name}" }
+                val more = if (fresh.size > 8) "\n… и ещё ${fresh.size - 8}" else ""
+                ChatHistory.append(
+                    applicationContext, "assistant",
+                    "Новые файлы во Входящих:\n$names$more\nСкажи, что с ними сделать (прочитать, найти, посчитать)."
+                )
+                launch(Dispatchers.Main) { showCurrentChat() }
+            }
         }
     }
 
-    private fun sendPrompt(prompt: String) {
-        input.setText("")
-        appendToLog("user", prompt)
-        ChatHistory.append(applicationContext, "user", prompt)
+    // ---------------------------------------------------------------- чаты
 
+    private fun showCurrentChat() {
+        val context = applicationContext
+        chatTitle.text = ChatHistory.currentTitle(context)
+        val history = ChatHistory.load(context)
+        adapter.setAll(history)
+        scrollToEnd()
+    }
+
+    private fun refreshChatList() {
+        chats = ChatHistory.list(applicationContext)
+        val current = ChatHistory.currentId(applicationContext)
+        chatsListView.adapter = object : ArrayAdapter<ChatInfo>(this, R.layout.item_chat, R.id.chatTitleItem, chats) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val view = super.getView(position, convertView, parent)
+                val item = chats[position]
+                (view as TextView).apply {
+                    text = item.title
+                    setBackgroundColor(if (item.id == current) 0xFFE3ECFF.toInt() else 0x00000000)
+                }
+                return view
+            }
+        }
+    }
+
+    private fun startNewChat() {
+        if (blockedWhileBusy()) return
+        ChatHistory.create(applicationContext)
+        drawer.closeDrawers()
+        showCurrentChat()
+    }
+
+    private fun confirmDelete(chat: ChatInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("Удалить чат?")
+            .setMessage("«${chat.title}» удалится вместе со всей перепиской.")
+            .setPositiveButton("Удалить") { _, _ ->
+                val wasCurrent = chat.id == ChatHistory.currentId(applicationContext)
+                if (wasCurrent && blockedWhileBusy()) return@setPositiveButton
+                ChatHistory.delete(applicationContext, chat.id)
+                refreshChatList()
+                if (wasCurrent) showCurrentChat()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    /** Пока ассистент отвечает, чат не переключаем: ответ должен попасть в тот же чат. */
+    private fun blockedWhileBusy(): Boolean {
+        if (busy) Toast.makeText(this, "Подожди ответа ассистента", Toast.LENGTH_SHORT).show()
+        return busy
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (drawer.isDrawerOpen(android.view.Gravity.START)) drawer.closeDrawers() else super.onBackPressed()
+    }
+
+    private fun scrollToEnd() {
+        messageList.post { if (adapter.itemCount > 0) messageList.scrollToPosition(adapter.itemCount - 1) }
+    }
+
+    private fun sendPrompt(prompt: String) {
+        if (busy) return
+        input.setText("")
+        val chatId = ChatHistory.currentId(applicationContext)
+        ChatHistory.append(applicationContext, "user", prompt, chatId)
+        chatTitle.text = ChatHistory.currentTitle(applicationContext)
+        adapter.add(ChatMessage("user", prompt, System.currentTimeMillis()))
+        scrollToEnd()
+
+        busy = true
         sendButton.isEnabled = false
         micButton.isEnabled = false
 
         uiScope.launch {
             val answer = repository.handle(prompt)
-            appendToLog("assistant", answer)
-            ChatHistory.append(applicationContext, "assistant", answer)
+            ChatHistory.append(applicationContext, "assistant", answer, chatId)
+            adapter.add(ChatMessage("assistant", answer, System.currentTimeMillis()))
+            scrollToEnd()
+            busy = false
             sendButton.isEnabled = true
             micButton.isEnabled = true
         }
-    }
-
-    private fun appendToLog(role: String, text: String) {
-        val prefix = if (role == "user") "Вы: " else "Ассистент: "
-        chatLog.append("\n$prefix$text\n")
-        chatScroll.post { chatScroll.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
     private fun launchVoiceRecognition() {

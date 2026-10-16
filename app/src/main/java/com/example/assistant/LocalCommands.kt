@@ -37,6 +37,7 @@ object LocalCommands {
         parsePlayerControl(t)?.let { return it }
         parsePlaylistAndLibrary(t)?.let { return it }
         parseMusicPlay(t)?.let { return it }
+        parseSharedList(t, w)?.let { return it }
         parseSettings(t, w)?.let { return it }
         parseWeb(text)?.let { return it }
         parseDial(text)?.let { return it }
@@ -110,6 +111,19 @@ object LocalCommands {
             }
             else -> null
         }
+    }
+
+    // ---------------------------------------------------------------- общая папка
+
+    /** «Что во входящих», «покажи общую папку»: список файлов без модели. */
+    private fun parseSharedList(t: String, w: List<String>): LocalCommand? {
+        if (w.none { it in setOf("что", "покажи", "список", "какие") }) return null
+        val inbox = w.any { it.startsWith("входящ") }
+        val outbox = w.any { it.startsWith("исходящ") }
+        val shared = t.contains("общ") && w.any { it.startsWith("папк") }
+        if (!inbox && !outbox && !shared) return null
+        val folder = if (outbox) "Исходящие" else if (inbox) "Входящие" else "все"
+        return LocalCommand("shared_folder", mapOf("action" to "list", "folder" to folder))
     }
 
     // ---------------------------------------------------------------- будильник
@@ -395,12 +409,20 @@ object LocalCommands {
 
     private val searchRe = Regex("^(?:найди|поищи|найти|загугли|погугли|гугли)(?: мне)? (?:в интернете|в гугле|в браузере|в сети|в google) (?:информацию (?:о|про|об) )?(.+)$")
     private val googleRe = Regex("^(?:загугли|погугли|гугли) (.+)$")
+    private val fileExtensions = setOf(
+        "csv", "txt", "json", "db", "sqlite", "xlsx", "xls", "pdf", "doc", "docx", "jpg", "jpeg", "png",
+        "mp3", "mp4", "zip", "apk", "xml", "log", "sql"
+    )
+
     private val siteRe = Regex("^(?:открой|открыть|запусти|зайди на|перейди на|перейди) (?:сайт )?((?:https?://)?[a-z0-9][a-z0-9.-]*\\.[a-z]{2,}(?:/\\S*)?)$")
 
     /** Работает по исходному тексту: в нормализованном точки пропадают. */
     private fun parseWeb(raw: String): LocalCommand? {
         val lower = raw.trim().lowercase(Locale.ROOT).trimEnd('.', '!', '?')
         siteRe.matchEntire(lower)?.let {
+            // «открой clients.csv» — это файл, а не сайт
+            val ext = it.groupValues[1].substringAfterLast('.')
+            if (ext in fileExtensions) return null
             return LocalCommand("open_browser", mapOf("url" to it.groupValues[1]))
         }
         val t = TextMatch.normalize(raw)
