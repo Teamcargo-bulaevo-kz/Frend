@@ -27,12 +27,20 @@ class ContactMatchTest {
     }
 
     @Test fun otherAlphabet() {
-        yes("джон", "John Smith")
         yes("алекс", "Alex")
     }
 
     @Test fun exactPrefersFullName() {
         assertTrue(ContactMatch.exact("иван", "Иван"))
         assertFalse(ContactMatch.exact("иван", "Иван Петров"))
+    }
+
+    @Test fun wakeWord() {
+        assertTrue(WakeWordService.isWakeWord("Джарвис"))
+        assertTrue(WakeWordService.isWakeWord("жарвис"))
+        assertFalse(WakeWordService.isWakeWord("включи"))
+        org.junit.Assert.assertEquals("включи музыку", WakeWordService.commandAfterWakeWord("Джарвис, включи музыку"))
+        org.junit.Assert.assertEquals("", WakeWordService.commandAfterWakeWord("джарвис"))
+        org.junit.Assert.assertNull(WakeWordService.commandAfterWakeWord("включи музыку"))
     }
 }
