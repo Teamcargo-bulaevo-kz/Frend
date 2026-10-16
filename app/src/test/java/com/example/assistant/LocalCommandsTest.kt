@@ -209,4 +209,34 @@ class LocalCommandsTest {
         assertNone("найди в базе Иванова")
         assertNone("открой clients.csv")
     }
+
+    // ---------------------------------------------------------------- контакты и таймер
+
+    @Test fun callContact() {
+        assertCmd("позвони маме", "call_contact", "name" to "маме")
+        assertCmd("Позвони Ивану Петрову", "call_contact", "name" to "ивану петрову")
+        assertCmd("набери Асель", "call_contact", "name" to "асель")
+        assertCmd("позвони 87771234567", "open_dialer", "number" to "87771234567")
+        assertNone("позвони маме и папе")
+        assertNone("позвони в такси")
+    }
+
+    @Test fun findContact() {
+        assertCmd("какой номер у Ивана", "find_contact", "name" to "ивана")
+        assertCmd("найди контакт Асель", "find_contact", "name" to "асель")
+    }
+
+    @Test fun timer() {
+        assertCmd("поставь таймер на 10 минут", "set_timer", "seconds" to 600)
+        assertCmd("таймер на полчаса", "set_timer", "seconds" to 1800)
+        assertCmd("таймер 30 секунд", "set_timer", "seconds" to 30)
+        assertCmd("поставь таймер на час", "set_timer", "seconds" to 3600)
+        assertCmd("таймер на 1 час 30 минут", "set_timer", "seconds" to 5400)
+        assertNone("отмени таймер")
+    }
+
+    @Test fun reminderGoesToModel() {
+        assertNone("напомни через 2 часа позвонить в склад")
+        assertNone("добавь в календарь встречу в пятницу в 10")
+    }
 }

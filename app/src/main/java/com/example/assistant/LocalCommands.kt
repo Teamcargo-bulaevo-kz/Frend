@@ -32,6 +32,7 @@ object LocalCommands {
 
         parseTimeQuestion(t, now)?.let { return it }
         parseAlarm(t, w, now)?.let { return it }
+        parseTimer(w)?.let { return it }
         parseScreenshot(t, w)?.let { return it }
         parseFlashlight(w)?.let { return it }
         parseCamera(t, w)?.let { return it }
@@ -43,6 +44,8 @@ object LocalCommands {
         parseSettings(t, w)?.let { return it }
         parseWeb(text)?.let { return it }
         parseDial(text)?.let { return it }
+        parseCallContact(w)?.let { return it }
+        parseFindContact(t)?.let { return it }
         parseOpenApp(t, w)?.let { return it }
         parseNotesList(t)?.let { return it }
         return null
@@ -113,6 +116,60 @@ object LocalCommands {
             }
             else -> null
         }
+    }
+
+    // ---------------------------------------------------------------- контакты и таймер
+
+    private val callVerbs = setOf("позвони", "позвонить", "набери", "вызови")
+
+    /** «Позвони маме», «набери Ивана Петрова». Номера цифрами разбирает parseDial. */
+    private fun parseCallContact(w: List<String>): LocalCommand? {
+        if (w.size !in 2..4 || w[0] !in callVerbs) return null
+        val rest = w.drop(1)
+        if (rest.any { word -> word.any { it.isDigit() } || word.startsWith("номер") }) return null
+        if (rest[0] in setOf("в", "на", "по", "мне", "домой")) return null
+        return LocalCommand("call_contact", mapOf("name" to rest.joinToString(" ")))
+    }
+
+    private fun parseFindContact(t: String): LocalCommand? {
+        for (prefix in listOf("какой номер у ", "найди контакт ", "покажи контакт ", "номер телефона ")) {
+            if (t.startsWith(prefix)) {
+                val name = t.removePrefix(prefix).trim()
+                if (name.isNotEmpty() && name.split(' ').size <= 3) return LocalCommand("find_contact", mapOf("name" to name))
+            }
+        }
+        return null
+    }
+
+    /** «Поставь таймер на 10 минут», «таймер на полчаса», «таймер 30 секунд». */
+    private fun parseTimer(w: List<String>): LocalCommand? {
+        if (w.none { it.startsWith("таймер") }) return null
+        if (w.any { it in alarmBlockers || it.startsWith("останов") || it.startsWith("сброс") }) return null
+        var seconds = 0
+        var found = false
+        var i = 0
+        while (i < w.size) {
+            val word = w[i]
+            val n = number(w, i)
+            val unit = if (n != null) w.getOrNull(i + n.second) else null
+            when {
+                word == "полчаса" -> { seconds += 1800; found = true; i++ }
+                n != null && unit != null && (unit.startsWith("сек") || unit.startsWith("мин") || unit.startsWith("час")) -> {
+                    seconds += n.first * when {
+                        unit.startsWith("сек") -> 1
+                        unit.startsWith("мин") -> 60
+                        else -> 3600
+                    }
+                    found = true
+                    i += n.second + 1
+                }
+                word.startsWith("секунд") -> { seconds += 1; found = true; i++ }
+                word.startsWith("минут") -> { seconds += 60; found = true; i++ }
+                word == "час" || word == "часа" -> { seconds += 3600; found = true; i++ }
+                else -> i++
+            }
+        }
+        return if (found && seconds > 0) LocalCommand("set_timer", mapOf("seconds" to seconds)) else null
     }
 
     // ---------------------------------------------------------------- общая папка

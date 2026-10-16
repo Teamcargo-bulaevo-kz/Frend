@@ -82,6 +82,7 @@ object ChatHistory {
     @Synchronized
     fun delete(context: Context, id: String) {
         file(context, id).delete()
+        summaryFile(context, id).delete()
         if (prefs(context).getString(KEY_CURRENT, null) == id) {
             prefs(context).edit().remove(KEY_CURRENT).apply()
         }
@@ -115,6 +116,31 @@ object ChatHistory {
     fun clear(context: Context) {
         val id = currentId(context)
         writeChat(context, id, DEFAULT_TITLE, emptyList())
+        summaryFile(context, id).delete()
+    }
+
+    // ---------------------------------------------------------------- сводка старых сообщений
+
+    /** Краткое содержание ранней части чата и время последнего сообщения, которое в него вошло. */
+    data class Summary(val text: String, val upTo: Long)
+
+    private fun summaryFile(context: Context, id: String) = File(dir(context), "$id.sum")
+
+    fun summary(context: Context, chatId: String? = null): Summary? {
+        val f = summaryFile(context, chatId ?: currentId(context))
+        if (!f.exists()) return null
+        return try {
+            val o = JSONObject(f.readText())
+            Summary(o.getString("text"), o.getLong("upTo"))
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    @Synchronized
+    fun setSummary(context: Context, chatId: String, summary: Summary) {
+        if (!file(context, chatId).exists()) return
+        summaryFile(context, chatId).writeText(JSONObject().put("text", summary.text).put("upTo", summary.upTo).toString())
     }
 
     // ---------------------------------------------------------------- хранение

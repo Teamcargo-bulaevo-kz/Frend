@@ -1,11 +1,15 @@
 package com.example.assistant
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Связывает модель (GroqClient) с реальными действиями (PhoneActions, MusicActions, NoteActions...).
@@ -13,7 +17,14 @@ import java.util.Locale
  */
 class AssistantRepository(private val context: Context, apiKey: String) {
 
+    private companion object {
+        // Общие для всех экземпляров: сводку одновременно собирает только один
+        val summaryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val summarizing = AtomicBoolean(false)
+    }
+
     private val client = GroqClient(apiKey)
+    private val summaryBatch = 12
     private val patternDao = NoteDatabase.getInstance(context).commandPatternDao()
 
     private fun normalize(text: String): String =
@@ -62,9 +73,45 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         }
 
         return try {
-            askModel(prompt, normalized)
+            askModel(prompt, normalized).also { summarizeInBackground() }
         } catch (e: Exception) {
             "Ошибка: ${e.message}"
+        }
+    }
+
+    // ---------------------------------------------------------------- сводка старых сообщений
+
+    /**
+     * Когда за пределами окна истории накопилось достаточно старых сообщений, сжимает их в короткую сводку.
+     * Модель дальше получает сводку и последние сообщения, а не весь чат: помнит давнее и тратит меньше токенов.
+     */
+    private fun summarizeInBackground() {
+        val chatId = ChatHistory.currentId(context)
+        val all = ChatHistory.load(context, chatId)
+        val old = all.dropLast(chatHistory)
+        val previous = ChatHistory.summary(context, chatId)
+        val fresh = old.filter { it.timestamp > (previous?.upTo ?: 0L) }
+        if (fresh.size < summaryBatch || !summarizing.compareAndSet(false, true)) return
+        summaryScope.launch {
+            try {
+                val transcript = fresh.joinToString("\n") {
+                    (if (it.role == "user") "Пользователь: " else "Ассистент: ") + it.text.take(400)
+                }
+                val messages = JSONArray()
+                    .put(JSONObject().put("role", "system").put("content",
+                        "Сожми переписку в краткую сводку до 150 слов по-русски: что известно о пользователе, о чём договорились, " +
+                            "важные числа и имена, незаконченные дела. Без вступлений." +
+                            (previous?.let { " Прежняя сводка (дополни её): ${it.text}" } ?: "")))
+                    .put(JSONObject().put("role", "user").put("content", transcript))
+                val result = client.sendConversation(messages, null, effort = "low", maxTokens = 500)
+                if (result is GroqResult.FinalText && result.text.isNotBlank()) {
+                    ChatHistory.setSummary(context, chatId, ChatHistory.Summary(result.text.trim(), fresh.last().timestamp))
+                }
+            } catch (e: Exception) {
+                // не получилось — попробуем в следующий раз
+            } finally {
+                summarizing.set(false)
+            }
         }
     }
 
@@ -91,6 +138,12 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 put("role", "system")
                 put("content", client.systemPrompt())
             })
+            ChatHistory.summary(context)?.let { sum ->
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", "Краткое содержание более ранней части разговора: ${sum.text}")
+                })
+            }
             for (m in history.takeLast(window)) {
                 put(JSONObject().apply {
                     put("role", if (m.role == "assistant") "assistant" else "user")
