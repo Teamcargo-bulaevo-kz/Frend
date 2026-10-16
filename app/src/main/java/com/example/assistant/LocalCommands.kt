@@ -25,6 +25,8 @@ object LocalCommands {
         parseNote(text, t)?.let { return it }
 
         if (w.size > 12) return null
+        // В фразе есть имя файла (clients.csv): это для модели и общей папки, а не для правил
+        if (text.lowercase().split(' ').any { tok -> tok.trimEnd('.', ',', '!', '?').substringAfterLast('.', "") in fileExtensions }) return null
         // Составная просьба («включи фонарик и поставь будильник») — это для модели: она вызовет несколько функций
         if (w.any { it == "и" || it == "потом" || it == "затем" }) return null
 
