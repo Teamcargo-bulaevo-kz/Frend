@@ -20,7 +20,7 @@ class ReminderReceiver : BroadcastReceiver() {
     companion object {
         private const val CHANNEL_ID = "assistant_reminders"
 
-        fun notify(context: Context, text: String) {
+        fun notify(context: Context, text: String, title: String = "Напоминание") {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "Напоминания", NotificationManager.IMPORTANCE_HIGH)
@@ -31,7 +31,7 @@ class ReminderReceiver : BroadcastReceiver() {
             )
             val notification = Notification.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                .setContentTitle("Напоминание")
+                .setContentTitle(title)
                 .setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text))
                 .setContentIntent(open)

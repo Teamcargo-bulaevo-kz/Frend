@@ -44,6 +44,7 @@ class GroqClient(private val apiKey: String) {
         return "Ты голосовой помощник на телефоне Максима. Отвечай по-русски, кратко. Сейчас: $now (${TimeZone.getDefault().id}). " +
             "Действия выполняй вызовом функций (можно несколько сразу), на обычные вопросы отвечай текстом. " +
             "Короткие просьбы вроде «запомни» или «а в метрах?» относятся к предыдущим сообщениям: не переспрашивай то, что уже сказано. " +
+            "Для свежих данных (новости, погода, курсы, цены, результаты матчей, всё, что могло измениться) вызывай web_search, не выдумывай. " +
             "Результат функции — единственный источник правды: не говори, что действие выполнено, если функция вернула ошибку. " +
             "Камеру и отправку сообщения WhatsApp пользователь запускает сам. " +
             "Чего нет в функциях (например, включить Wi-Fi), сделать нельзя: скажи об этом и предложи ближайшее действие."
@@ -77,6 +78,39 @@ class GroqClient(private val apiKey: String) {
         } catch (e: GroqApiException) {
             if (extras && e.code == 400) parseResponse(execute(body(false))) else throw e
         }
+    }
+
+    /**
+     * Поиск свежей информации в интернете: встроенный инструмент browser_search моделей gpt-oss на Groq
+     * (тот же ключ). Возвращает короткий ответ с названиями источников.
+     */
+    suspend fun webSearch(query: String): String = withContext(Dispatchers.IO) {
+        val system = "Найди в интернете актуальную информацию и ответь по-русски кратко, не больше 120 слов: главное, цифры и даты. " +
+            "В конце назови 1–3 источника по названию сайта. Если данных нет, так и скажи. Ответ начни со слова «ИТОГ:»."
+        fun body(extras: Boolean) = JSONObject().apply {
+            put("model", model)
+            put("messages", JSONArray()
+                .put(JSONObject().put("role", "system").put("content", system + " Сейчас: " +
+                    SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ru")).format(Date()) + " (${TimeZone.getDefault().id})."))
+                .put(JSONObject().put("role", "user").put("content", query)))
+            put("tools", JSONArray().put(JSONObject().put("type", "browser_search")))
+            put("tool_choice", "required")
+            if (extras) {
+                put("reasoning_effort", "low")
+                put("max_completion_tokens", 2000)
+            }
+        }
+        val response = try {
+            execute(body(true))
+        } catch (e: GroqApiException) {
+            if (e.code == 400) execute(body(false)) else throw e
+        }
+        val content = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+            ?.optString("content", "").orEmpty().trim()
+        if (content.isEmpty()) return@withContext "Поиск ничего не вернул."
+        // В content бывают выдержки из найденных страниц, а итог идёт после маркера
+        val marker = content.lastIndexOf("ИТОГ:")
+        (if (marker >= 0) content.substring(marker + 5) else content.takeLast(1500)).trim()
     }
 
     /** Модели Groq, которые понимают картинки. Если первая недоступна, пробуем следующую. */

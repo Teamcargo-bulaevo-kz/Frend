@@ -41,6 +41,9 @@ object LocalCommands {
         parsePlaylistAndLibrary(t)?.let { return it }
         parseMusicPlay(t)?.let { return it }
         parseSharedList(t, w)?.let { return it }
+        parseQuickToggle(t, w)?.let { return it }
+        parseBrightness(t, w)?.let { return it }
+        parseWebSearch(t)?.let { return it }
         parseSettings(t, w)?.let { return it }
         parseWeb(text)?.let { return it }
         parseDial(text)?.let { return it }
@@ -466,7 +469,63 @@ object LocalCommands {
         return LocalCommand("open_settings", mapOf("section" to (section ?: "main")))
     }
 
-    private val searchRe = Regex("^(?:найди|поищи|найти|загугли|погугли|гугли)(?: мне)? (?:в интернете|в гугле|в браузере|в сети|в google) (?:информацию (?:о|про|об) )?(.+)$")
+    private val onVerbs = setOf("включи", "включить", "вруби", "включай", "активируй")
+    private val offVerbs = setOf("выключи", "выключить", "отключи", "отключить", "отруби", "вырубай", "деактивируй")
+    private val toggleWords = setOf("мне", "пожалуйста", "режим", "функцию", "на", "телефоне")
+
+    /** «Включи вайфай», «выключи режим полёта», «отключи блютуз»: нажимает плитку в шторке. */
+    private fun parseQuickToggle(t: String, w: List<String>): LocalCommand? {
+        val on = w[0] in onVerbs
+        if (!on && w[0] !in offVerbs) return null
+        val rest = w.drop(1).filter { it !in toggleWords }
+        if (rest.isEmpty() || rest.size > 3) return null
+        if (rest.any { it in notQuickWords }) return null
+        val joined = rest.joinToString(" ")
+        val key = QuickSettings.resolve(joined) ?: return null
+        // Сказали только про одну плитку, а не «включи интернет радио»
+        if (QuickSettings.tiles.getValue(key).none { TextMatch.normalize(it) == joined || joined.startsWith(TextMatch.normalize(it)) || joined.endsWith(TextMatch.normalize(it)) }) return null
+        return LocalCommand("quick_setting", mapOf("setting" to joined, "state" to if (on) "on" else "off"))
+    }
+
+    private val notQuickWords = setOf("радио", "музыку", "песню", "трек", "фонарик", "фонарь", "камеру", "свет")
+
+    /** «Яркость на 50», «сделай ярче», «убавь яркость», «максимальная яркость», «автояркость». */
+    private fun parseBrightness(t: String, w: List<String>): LocalCommand? {
+        val mentions = w.any { it.startsWith("яркост") || it.startsWith("автояркост") } ||
+            w.any { it in setOf("ярче", "поярче", "темнее", "потемнее") }
+        if (!mentions) return null
+        if (w.any { it.startsWith("автояркост") } || t.contains("автоматическ")) {
+            return LocalCommand("set_brightness", mapOf("change" to "auto"))
+        }
+        for (i in w.indices) {
+            val n = number(w, i) ?: continue
+            if (n.first in 0..100) return LocalCommand("set_brightness", mapOf("percent" to maxOf(1, n.first)))
+        }
+        val change = when {
+            w.any { it.startsWith("максимальн") || it == "максимум" || it == "полную" } -> "max"
+            w.any { it.startsWith("минимальн") || it == "минимум" } -> "min"
+            w.any { it in setOf("ярче", "поярче", "добавь", "увеличь", "повысь", "больше", "выше") } -> "up"
+            w.any { it in setOf("темнее", "потемнее", "убавь", "уменьши", "понизь", "меньше", "ниже") } -> "down"
+            else -> return null
+        }
+        return LocalCommand("set_brightness", mapOf("change" to change))
+    }
+
+    private val webSearchRe = Regex("^(?:найди|поищи|найти|узнай)(?: мне)? (?:в интернете|в сети) (?:информацию (?:о|про|об) )?(.+)$")
+
+    /** Свежая информация без модели-посредника: новости, погода, курсы. */
+    private fun parseWebSearch(t: String): LocalCommand? {
+        webSearchRe.matchEntire(t)?.let { return LocalCommand("web_search", mapOf("query" to it.groupValues[1])) }
+        if (t in setOf("новости", "какие новости", "что нового", "последние новости", "что в мире")) {
+            return LocalCommand("web_search", mapOf("query" to "главные новости сегодня: Казахстан и мир"))
+        }
+        if (t.split(' ').size in 2..6 && (t.startsWith("какая погода") || t.startsWith("погода") || t.startsWith("какой курс") || t.startsWith("курс "))) {
+            return LocalCommand("web_search", mapOf("query" to t))
+        }
+        return null
+    }
+
+    private val searchRe = Regex("^(?:найди|поищи|найти|загугли|погугли|гугли)(?: мне)? (?:в гугле|в браузере|в google) (?:информацию (?:о|про|об) )?(.+)$")
     private val googleRe = Regex("^(?:загугли|погугли|гугли) (.+)$")
     private val fileExtensions = setOf(
         "csv", "txt", "json", "db", "sqlite", "xlsx", "xls", "pdf", "doc", "docx", "jpg", "jpeg", "png",

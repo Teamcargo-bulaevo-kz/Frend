@@ -146,7 +146,8 @@ class LocalCommandsTest {
         assertCmd("открой youtube.com", "open_browser", "url" to "youtube.com")
         assertCmd("открой сайт example.com", "open_browser", "url" to "example.com")
         assertCmd("загугли погоду в астане", "open_browser", "search_query" to "погоду в астане")
-        assertCmd("найди в интернете рецепт борща", "open_browser", "search_query" to "рецепт борща")
+        assertCmd("найди в интернете рецепт борща", "web_search", "query" to "рецепт борща")
+        assertCmd("найди в браузере рецепт борща", "open_browser", "search_query" to "рецепт борща")
         assertNone("найди рецепт борща")
         assertCmd("позвони 8 777 123 45 67", "open_dialer", "number" to "87771234567")
         assertCmd("набери +7 777 123 45 67", "open_dialer", "number" to "+77771234567")
@@ -237,5 +238,46 @@ class LocalCommandsTest {
     @Test fun reminderGoesToModel() {
         assertNone("напомни через 2 часа позвонить в склад")
         assertNone("добавь в календарь встречу в пятницу в 10")
+    }
+
+    // ---------------------------------------------------------------- шторка, яркость, интернет
+
+    @Test fun quickToggles() {
+        assertCmd("включи вайфай", "quick_setting", "setting" to "вайфай", "state" to "on")
+        assertCmd("выключи блютуз", "quick_setting", "setting" to "блютуз", "state" to "off")
+        assertCmd("включи режим полёта", "quick_setting", "setting" to "полета", "state" to "on")
+        assertCmd("отключи мобильный интернет", "quick_setting", "setting" to "мобильный интернет", "state" to "off")
+        assertCmd("включи геолокацию", "quick_setting", "setting" to "геолокацию", "state" to "on")
+        assertNone("включи интернет радио")
+        assertNone("включи фонарик и блютуз")
+        assertCmd("открой вайфай", "open_settings", "section" to "wifi")
+    }
+
+    @Test fun brightness() {
+        assertCmd("яркость на 50", "set_brightness", "percent" to 50)
+        assertCmd("поставь яркость 70 процентов", "set_brightness", "percent" to 70)
+        assertCmd("сделай ярче", "set_brightness", "change" to "up")
+        assertCmd("убавь яркость", "set_brightness", "change" to "down")
+        assertCmd("максимальная яркость", "set_brightness", "change" to "max")
+        assertCmd("включи автояркость", "set_brightness", "change" to "auto")
+    }
+
+    @Test fun webSearchRules() {
+        assertCmd("какие новости", "web_search", "query" to "главные новости сегодня: Казахстан и мир")
+        assertCmd("какая погода в астане", "web_search", "query" to "какая погода в астане")
+        assertCmd("какой курс доллара", "web_search", "query" to "какой курс доллара")
+    }
+
+    @Test fun quickSettingsMatching() {
+        org.junit.Assert.assertEquals("wifi", QuickSettings.resolve("Wi-Fi"))
+        org.junit.Assert.assertEquals("wifi", QuickSettings.resolve("вайфай"))
+        org.junit.Assert.assertEquals("airplane", QuickSettings.resolve("режим полёта"))
+        org.junit.Assert.assertEquals("mobile_data", QuickSettings.resolve("мобильный интернет"))
+        org.junit.Assert.assertNull(QuickSettings.resolve("громкость"))
+        org.junit.Assert.assertEquals(false, QuickSettings.stateFrom("Wi-Fi, Выключено"))
+        org.junit.Assert.assertEquals(true, QuickSettings.stateFrom("Bluetooth, Включено"))
+        org.junit.Assert.assertEquals(false, QuickSettings.stateFrom("Wi-Fi off"))
+        org.junit.Assert.assertEquals(true, QuickSettings.stateFrom("Wi-Fi on"))
+        org.junit.Assert.assertNull(QuickSettings.stateFrom("Wi-Fi"))
     }
 }

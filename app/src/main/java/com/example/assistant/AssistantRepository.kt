@@ -223,6 +223,21 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         else -> SharedFolder.list(context, a.optStringOrNull("folder"))
     }
 
+    /** Переключатели из шторки: автоповорот меняем напрямую, остальные нажимаем через службу специальных возможностей. */
+    private suspend fun quickSetting(setting: String, state: String): String {
+        val want: Boolean? = when (state.lowercase()) { "on" -> true; "off" -> false; else -> null }
+        if (TextMatch.normalize(setting).contains("фонар")) return PhoneActions.setFlashlight(context, want ?: true)
+        if (QuickSettings.resolve(setting) == "rotation") return withContext(Dispatchers.IO) { SystemActions.rotation(context, want) }
+        val service = AssistantAccessibilityService.instance
+        if (service == null || !service.hasWindowAccess()) {
+            PhoneActions.launch(context, android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return "Чтобы переключать Wi-Fi, Bluetooth и другое из шторки, включи службу «Assistant» в специальных возможностях " +
+                "(если уже включена, выключи и включи заново: после обновления ей нужны новые права). " +
+                "Если пункт серый: Настройки → Приложения → Assistant → меню ⋮ → «Разрешить ограниченные настройки»."
+        }
+        return service.quickSetting(setting, want)
+    }
+
     /** Распознаёт текст на картинке из общей папки моделью с «зрением». */
     private suspend fun recognizeImage(name: String?, task: String?, saveAs: String?): String {
         val file = withContext(Dispatchers.IO) { SharedFolder.imageFile(name) }
@@ -296,6 +311,15 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 ContactActions.message(context, a.optString("name", ""), a.optStringOrNull("text"), a.optStringOrNull("app"))
             }
             "find_contact" -> withContext(Dispatchers.IO) { ContactActions.info(context, a.optString("name", "")) }
+
+            "web_search" -> client.webSearch(a.optString("query", ""))
+            "schedule_digest" -> DigestActions.add(context, a.optString("topic", ""), a.optStringOrNull("time"))
+            "list_digests" -> DigestActions.list(context)
+            "cancel_digest" -> DigestActions.cancel(context, a.optStringOrNull("query"))
+            "set_brightness" -> withContext(Dispatchers.IO) {
+                SystemActions.brightness(context, a.optIntOrNull("percent"), a.optStringOrNull("change"))
+            }
+            "quick_setting" -> quickSetting(a.optString("setting", ""), a.optString("state", "toggle"))
 
             "set_timer" -> ReminderActions.setTimer(context, a.optInt("seconds", 0), a.optStringOrNull("label"))
             "set_reminder" -> ReminderActions.setReminder(
