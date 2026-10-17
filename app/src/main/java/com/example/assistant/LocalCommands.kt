@@ -36,13 +36,13 @@ object LocalCommands {
         parseScreenshot(t, w)?.let { return it }
         parseFlashlight(w)?.let { return it }
         parseCamera(t, w)?.let { return it }
+        parseBrightness(t, w)?.let { return it }
         parseVolume(t, w)?.let { return it }
         parsePlayerControl(t)?.let { return it }
         parsePlaylistAndLibrary(t)?.let { return it }
         parseMusicPlay(t)?.let { return it }
         parseSharedList(t, w)?.let { return it }
         parseQuickToggle(t, w)?.let { return it }
-        parseBrightness(t, w)?.let { return it }
         parseWebSearch(t)?.let { return it }
         parseSettings(t, w)?.let { return it }
         parseWeb(text)?.let { return it }
