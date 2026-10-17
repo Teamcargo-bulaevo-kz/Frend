@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/music_bg" android:gravity="center_horizontal" android:orientation="vertical"
+    android:padding="24dp">
+
+    <ImageView
+        android:id="@+id/cover" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_marginTop="16dp" android:layout_weight="1" android:adjustViewBounds="true"
+        android:scaleType="centerInside" android:src="@drawable/cover_placeholder" />
+
+    <TextView
+        android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="20dp" android:ellipsize="end" android:gravity="center" android:maxLines="2"
+        android:textColor="@color/music_text" android:textSize="22sp" android:textStyle="bold" />
+    <TextView
+        android:id="@+id/artist" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" android:ellipsize="end" android:gravity="center" android:maxLines="1"
+        android:textColor="@color/music_text_dim" android:textSize="16sp" />
+    <TextView
+        android:id="@+id/tags" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:gravity="center" android:textColor="@color/music_accent" android:textSize="13sp" />
+
+    <SeekBar
+        android:id="@+id/seek" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="16dp" android:progressTint="@color/music_accent" android:thumbTint="@color/music_accent" />
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView
+            android:id="@+id/timeNow" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:textColor="@color/music_text_dim" android:textSize="12sp" />
+        <TextView
+            android:id="@+id/timeTotal" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textColor="@color/music_text_dim" android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+        android:gravity="center" android:orientation="horizontal">
+        <ImageButton
+            android:id="@+id/shuffle" android:layout_width="52dp" android:layout_height="52dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Вперемешку" android:src="@drawable/ic_shuffle" />
+        <ImageButton
+            android:id="@+id/prev" android:layout_width="60dp" android:layout_height="60dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Назад" android:src="@drawable/ic_prev" />
+        <ImageButton
+            android:id="@+id/play" android:layout_width="72dp" android:layout_height="72dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Играть" android:src="@drawable/ic_play" />
+        <ImageButton
+            android:id="@+id/next" android:layout_width="60dp" android:layout_height="60dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Дальше" android:src="@drawable/ic_next" />
+        <ImageButton
+            android:id="@+id/repeat" android:layout_width="52dp" android:layout_height="52dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Повтор" android:src="@drawable/ic_repeat" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:gravity="center" android:orientation="horizontal">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/queueButton" style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Очередь" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/similarButton" style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ещё такое" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sleepButton" style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Таймер сна" />
+    </LinearLayout>
+</LinearLayout>

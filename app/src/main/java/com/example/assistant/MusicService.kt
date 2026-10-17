@@ -17,6 +17,8 @@ import android.media.MediaPlayer
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.IBinder
 import android.os.PowerManager
 
@@ -37,7 +39,13 @@ class MusicService : Service() {
         private const val CHANNEL_ID = "music_playback"
         private const val NOTIFICATION_ID = 1001
 
+        const val EXTRA_INDEX = "index"
+
         @Volatile var isRunning = false
+            private set
+
+        /** Живой экземпляр сервиса: экраны музыки (тот же процесс) вызывают его напрямую. */
+        @Volatile var instance: MusicService? = null
             private set
     }
 
@@ -49,6 +57,11 @@ class MusicService : Service() {
     private var wantPlay = true
 
     private var queue: List<MusicTrack> = emptyList()
+    private var originalQueue: List<MusicTrack> = emptyList()
+    private var shuffleOn = false
+    private var repeatMode = PlayerState.REPEAT_OFF
+    private val handler = Handler(Looper.getMainLooper())
+    private val sleepRunnable = Runnable { pause(); PlayerState.sleepAtMs = 0L }
     private var index = 0
     private var errorsInRow = 0
     private var resumeOnFocusGain = false
@@ -92,6 +105,7 @@ class MusicService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+        instance = this
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createChannel()
         session = MediaSession(this, "AssistantMusic").apply {
@@ -101,6 +115,7 @@ class MusicService : Service() {
                 override fun onSkipToNext() = next(auto = false)
                 override fun onSkipToPrevious() = previous()
                 override fun onStop() = stopPlayback()
+                override fun onSeekTo(pos: Long) = seekTo(pos.toInt())
             })
             isActive = true
         }
@@ -112,7 +127,9 @@ class MusicService : Service() {
                 // startForegroundService обязывает сразу показать уведомление
                 enterForeground()
                 queue = MusicQueue.tracks
-                index = 0
+                originalQueue = queue
+                shuffleOn = false
+                index = intent.getIntExtra(EXTRA_INDEX, 0)
                 errorsInRow = 0
                 playCurrent()
             }
@@ -129,9 +146,12 @@ class MusicService : Service() {
     override fun onDestroy() {
         releasePlayer()
         abandonFocus()
+        handler.removeCallbacks(sleepRunnable)
         session?.release()
         session = null
         isRunning = false
+        instance = null
+        PlayerState.clear()
         super.onDestroy()
     }
 
@@ -197,7 +217,11 @@ class MusicService : Service() {
 
     private fun next(auto: Boolean) {
         if (queue.isEmpty()) return
-        if (auto && index >= queue.lastIndex) {
+        if (auto && repeatMode == PlayerState.REPEAT_ONE) {
+            playCurrent()
+            return
+        }
+        if (auto && index >= queue.lastIndex && repeatMode != PlayerState.REPEAT_ALL) {
             stopPlayback()
             return
         }
@@ -260,6 +284,83 @@ class MusicService : Service() {
         player = null
     }
 
+    // ---------------------------------------------------------------- управление из экранов музыки
+
+    fun seekTo(ms: Int) {
+        val current = player ?: return
+        if (prepared) {
+            current.seekTo(ms.coerceIn(0, current.duration.coerceAtLeast(0)))
+            refreshState()
+        }
+    }
+
+    fun togglePlay() {
+        if (player?.isPlaying == true) pause() else resume()
+    }
+
+    fun skipNext() = next(auto = false)
+
+    fun skipPrevious() = previous()
+
+    fun playIndex(i: Int) {
+        if (i !in queue.indices) return
+        index = i
+        errorsInRow = 0
+        playCurrent()
+    }
+
+    fun toggleShuffle() {
+        val current = queue.getOrNull(index)
+        if (!shuffleOn) {
+            originalQueue = queue
+            val rest = queue.filterIndexed { i, _ -> i != index }.shuffled()
+            queue = if (current != null) listOf(current) + rest else rest
+            index = 0
+        } else {
+            queue = originalQueue
+            index = current?.let { c -> queue.indexOfFirst { it.id == c.id } }?.takeIf { it >= 0 } ?: 0
+        }
+        shuffleOn = !shuffleOn
+        refreshState()
+    }
+
+    fun cycleRepeat() {
+        repeatMode = (repeatMode + 1) % 3
+        refreshState()
+    }
+
+    /** Добавляет трек в очередь: следующим или в конец. Если плеер не запущен, начинает с него. */
+    fun enqueue(track: MusicTrack, playNext: Boolean) {
+        val list = queue.toMutableList()
+        val at = if (playNext) (index + 1).coerceAtMost(list.size) else list.size
+        list.add(at, track)
+        queue = list
+        originalQueue = originalQueue + track
+        refreshState()
+    }
+
+    /** Убирает трек из очереди (не текущий). */
+    fun removeFromQueue(i: Int) {
+        if (i !in queue.indices || i == index) return
+        val list = queue.toMutableList()
+        val removed = list.removeAt(i)
+        queue = list
+        originalQueue = originalQueue.filter { it.id != removed.id }
+        if (i < index) index--
+        refreshState()
+    }
+
+    /** Таймер сна: через minutes минут музыка встанет на паузу. 0 — отменить. */
+    fun setSleepTimer(minutes: Int) {
+        handler.removeCallbacks(sleepRunnable)
+        if (minutes > 0) {
+            handler.postDelayed(sleepRunnable, minutes * 60_000L)
+            PlayerState.sleepAtMs = System.currentTimeMillis() + minutes * 60_000L
+        } else {
+            PlayerState.sleepAtMs = 0L
+        }
+    }
+
     // ---------------------------------------------------------------- звуковой фокус
 
     private fun requestFocus() {
@@ -301,7 +402,7 @@ class MusicService : Service() {
         val track = queue.getOrNull(index)
         val playing = player?.isPlaying == true
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
+            this, 0, Intent(this, MusicActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val builder = Notification.Builder(this, CHANNEL_ID)
@@ -337,6 +438,7 @@ class MusicService : Service() {
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, track?.title ?: "")
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, track?.artist ?: "")
+                .putLong(MediaMetadata.METADATA_KEY_DURATION, if (prepared) (player?.duration ?: 0).toLong() else 0L)
                 .build()
         )
         session?.setPlaybackState(
@@ -344,7 +446,7 @@ class MusicService : Service() {
                 .setActions(
                     PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
                         PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or
-                        PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP
+                        PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP or PlaybackState.ACTION_SEEK_TO
                 )
                 .setState(
                     if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
@@ -353,6 +455,14 @@ class MusicService : Service() {
                 )
                 .build()
         )
+        PlayerState.track = track
+        PlayerState.playing = playing
+        PlayerState.index = index
+        PlayerState.queue = queue
+        PlayerState.shuffle = shuffleOn
+        PlayerState.repeat = repeatMode
+        PlayerState.durationMs = if (prepared) (player?.duration ?: 0).coerceAtLeast(0) else 0
+        PlayerState.positionProvider = { if (prepared) (player?.currentPosition ?: 0) else 0 }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification())
     }

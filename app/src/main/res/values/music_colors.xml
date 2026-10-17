@@ -1,0 +1,8 @@
+<resources>
+    <color name="music_bg">#121216</color>
+    <color name="music_surface">#1E1E26</color>
+    <color name="music_accent">#FF6B4A</color>
+    <color name="music_text">#F2F2F5</color>
+    <color name="music_text_dim">#9A9AA8</color>
+    <color name="music_icon_bg">#FF6B4A</color>
+</resources>

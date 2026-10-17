@@ -124,6 +124,7 @@ object PhoneActions {
         listOf("контакт*", "contacts") to "contacts",
         listOf("калькулятор*", "calculator") to "calculator",
         listOf("календар*", "calendar") to "calendar",
+        listOf("музык*", "плеер*", "плейер*") to "music",
         listOf("whatsapp", "ватсап*", "вацап*", "вотсап*", "уотсап*") to "whatsapp",
     )
 
@@ -163,6 +164,12 @@ object PhoneActions {
             "calculator" -> launchCategory(context, Intent.CATEGORY_APP_CALCULATOR)
             "calendar" -> launchCategory(context, Intent.CATEGORY_APP_CALENDAR)
             "whatsapp" -> return openWhatsApp(context, null, null)
+            "music" -> return try {
+                context.startActivity(Intent(context, MusicActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                "Открываю приложение «Музыка»"
+            } catch (e: Exception) {
+                "Не получилось открыть «Музыку»: ${e.message}"
+            }
             else -> false
         }
         if (opened) return "Открываю «$name»"

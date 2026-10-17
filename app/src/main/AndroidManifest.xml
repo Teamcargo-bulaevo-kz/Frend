@@ -69,6 +69,28 @@
             </intent-filter>
         </activity>
 
+        <!-- Второе приложение «Музыка»: свой значок, своя задача в списке недавних -->
+        <activity
+            android:name=".MusicActivity"
+            android:exported="true"
+            android:icon="@mipmap/ic_music"
+            android:roundIcon="@mipmap/ic_music"
+            android:label="Музыка"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.example.assistant.music"
+            android:theme="@style/Theme.Music">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".PlayerActivity"
+            android:exported="false"
+            android:label="Музыка"
+            android:taskAffinity="com.example.assistant.music"
+            android:theme="@style/Theme.Music" />
+
         <!-- Прозрачный экран голосовой команды из шторки -->
         <activity
             android:name=".VoiceActivity"
