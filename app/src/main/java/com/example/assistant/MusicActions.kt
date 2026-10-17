@@ -22,8 +22,9 @@ object MusicActions {
 
     // ---------------------------------------------------------------- воспроизведение
 
-    fun playMusic(context: Context, query: String, shuffle: Boolean): String {
+    fun playMusic(context: Context, query: String, shuffle: Boolean, mood: String? = null, genre: String? = null): String {
         val index = MusicLibrary.index(context)
+        if (mood != null || genre != null) return playByTags(context, index.allMusic(), mood, genre)
         val blank = query.isBlank()
         val found = if (blank) index.allMusic() else index.search(query, 100)
         if (found.isEmpty()) {
@@ -35,6 +36,50 @@ object MusicActions {
         val first = tracks.first()
         val name = if (first.artist.isBlank()) first.title else "${first.artist} — ${first.title}"
         return if (tracks.size > 1) "Включаю «$name», дальше ещё ${tracks.size - 1}" else "Включаю «$name»"
+    }
+
+    private fun playByTags(context: Context, music: List<MusicTrack>, mood: String?, genre: String?): String {
+        if (music.isEmpty()) return NO_ACCESS
+        val label = listOfNotNull(mood?.let { MusicTags.moods[it]?.lowercase() }, genre?.let { MusicTags.genres[it]?.lowercase() })
+            .joinToString(", ")
+        if (MusicTags.count(context) == 0) {
+            val started = MusicTagger.start(context)
+            return "Музыка ещё не размечена по настроению и жанру. $started Когда будет готово, повтори просьбу."
+        }
+        val found = MusicTags.filter(context, music, mood, genre)
+        if (found.isEmpty()) {
+            val tail = if (MusicTagger.running) " Разметка ещё идёт (${MusicTagger.done} из ${MusicTagger.total}), попробуй позже." else ""
+            return "Не нашёл у тебя музыки с настроением/жанром «$label».$tail"
+        }
+        val tracks = found.shuffled().take(300)
+        startPlayback(context, tracks)
+        val first = tracks.first()
+        val name = if (first.artist.isBlank()) first.title else "${first.artist} — ${first.title}"
+        return "Включаю подборку ($label): «$name», всего ${tracks.size}"
+    }
+
+    /** Разметка музыки и выгрузка полного списка песен. */
+    fun tags(context: Context, action: String): String {
+        val music = MusicLibrary.index(context).allMusic()
+        if (music.isEmpty()) return NO_ACCESS
+        return when (action.trim().lowercase()) {
+            "analyze" -> MusicTagger.start(context)
+            "status" -> MusicTags.summary(context, music) + if (MusicTagger.running) "\n" + MusicTagger.progressText() else ""
+            "export" -> exportList(context, music)
+            else -> "Неизвестное действие: $action"
+        }
+    }
+
+    private fun exportList(context: Context, music: List<MusicTrack>): String {
+        val rows = ArrayList<List<String>>()
+        rows.add(listOf("Исполнитель", "Название", "Альбом", "Жанр", "Настроение", "Энергичность (1-5)"))
+        for (t in music.sortedWith(compareBy({ it.artist.lowercase() }, { it.title.lowercase() }))) {
+            val tg = MusicTags.get(context, t)
+            rows.add(listOf(t.artist, t.title, t.album, tg?.let { MusicTags.genres[it.genre] }.orEmpty(),
+                tg?.let { MusicTags.moods[it.mood] }.orEmpty(), tg?.energy?.toString().orEmpty()))
+        }
+        val result = SharedFolder.write("songs.csv", "\uFEFF" + FileConvert.toCsv(rows), append = false, overwrite = true)
+        return "Список из ${music.size} песен сохранён в Исходящие как songs.csv. $result"
     }
 
     /** Что есть в музыкальной библиотеке: сводка или результаты поиска по запросу. */

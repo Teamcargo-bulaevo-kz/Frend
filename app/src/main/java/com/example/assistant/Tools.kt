@@ -60,8 +60,18 @@ object Tools {
                     "Найденные треки встают в очередь.",
                 listOf(
                     "query" to text("Название трека, исполнитель или альбом. Если пользователь просит просто включить музыку без уточнений, оставь пустым"),
-                    "shuffle" to flag("true — играть вперемешку")
+                    "shuffle" to flag("true — играть вперемешку"),
+                    "mood" to choice("Настроение музыки, если просят подобрать по настроению", MusicTags.moods.keys.toList()),
+                    "genre" to choice("Жанр, если просят музыку определённого жанра", MusicTags.genres.keys.toList())
                 )
+            ))
+            put(tool(
+                "music_tags",
+                "Разметка музыки на телефоне: жанр, настроение, энергичность каждой песни. " +
+                    "analyze — разметить неразмеченные песни (в фоне), status — сколько размечено и ход разметки, " +
+                    "export — сохранить полный список песен с жанром и настроением в таблицу CSV в папке Исходящие.",
+                listOf("action" to choice("Что сделать", listOf("analyze", "status", "export"))),
+                listOf("action")
             ))
             put(tool(
                 "music_control",
@@ -329,7 +339,7 @@ object Tools {
 
     private val groups: Map<String, List<String>> = mapOf(
         "alarm" to listOf("set_alarm"),
-        "music" to listOf("play_music", "music_control", "set_volume", "playlist", "music_library"),
+        "music" to listOf("play_music", "music_control", "set_volume", "playlist", "music_library", "music_tags"),
         "notes" to listOf("create_note", "list_notes", "search_notes", "delete_note"),
         "phone" to listOf(
             "flashlight", "open_camera", "take_screenshot", "open_app", "open_browser",
@@ -349,7 +359,8 @@ object Tools {
         "alarm" to listOf("будильник", "разбуд", "заведи"),
         "music" to listOf(
             "музык", "песн", "трек", "плейлист", "громк", "тише", "громче", "потише", "погромче", "пауз",
-            "дальше", "следующ", "предыдущ", "играй", "альбом", "исполнител", "групп", "звук", "артист"
+            "дальше", "следующ", "предыдущ", "играй", "альбом", "исполнител", "групп", "звук", "артист",
+            "настроени", "жанр", "разметк", "размет", "энергичн", "спокойн", "весел", "грустн"
         ),
         "notes" to listOf("заметк", "запомн", "запиш", "сохран", "удал"),
         "phone" to listOf(

@@ -395,6 +395,21 @@ object LocalCommands {
                 }
             }
         }
+        if (Regex("^(проанализируй|размет\\p{L}*|определи (жанр|настроение))( мою| всю| мои)? (музык\\p{L}*|песн\\p{L}*|треки)( по (жанр|настроени)\\p{L}*)?$").matches(t) ||
+            t in setOf("разметь музыку", "определи жанры и настроение песен", "проанализируй мою музыку")
+        ) {
+            return LocalCommand("music_tags", mapOf("action" to "analyze"))
+        }
+        if (t in setOf("как идет разметка музыки", "статус разметки", "сколько песен размечено", "как идет разметка", "статистика музыки")) {
+            return LocalCommand("music_tags", mapOf("action" to "status"))
+        }
+        if (t in setOf(
+                "выгрузи список песен", "экспортируй список песен", "список всех песен в файл", "выгрузи мою музыку", "дай весь список песен",
+                "покажи весь список песен", "выгрузи список музыки", "экспортируй список музыки", "список всех моих песен"
+            )
+        ) {
+            return LocalCommand("music_tags", mapOf("action" to "export"))
+        }
         if (t in setOf("какие у меня плейлисты", "покажи плейлисты", "мои плейлисты", "список плейлистов", "какие есть плейлисты", "покажи мои плейлисты")) {
             return LocalCommand("playlist", mapOf("action" to "list"))
         }
@@ -433,6 +448,17 @@ object LocalCommands {
         val joined = rest.joinToString(" ")
         if (joined in setOf("музыку", "что нибудь", "что нить", "музон", "музыка")) {
             return LocalCommand("play_music", mapOf("query" to "", "shuffle" to true))
+        }
+        // «включи спокойную музыку», «поставь что-нибудь энергичное», «включи рок»
+        if (rest.size <= 4 && rest[0] !in setOf("песню", "трек", "композицию", "альбом", "исполнителя", "группу")) {
+            val mood = MusicTags.moodFromWords(joined)
+            val genre = MusicTags.genreFromWords(joined)
+            if (mood != null || genre != null) {
+                val args = mutableMapOf<String, Any?>("query" to "", "shuffle" to true)
+                mood?.let { args["mood"] = it }
+                genre?.let { args["genre"] = it }
+                return LocalCommand("play_music", args)
+            }
         }
         // «включи песню волны», «поставь исполнителя Баста»
         if (rest.size >= 2 && rest[0] in playKeywords) {

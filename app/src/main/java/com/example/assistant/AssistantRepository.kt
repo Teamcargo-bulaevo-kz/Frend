@@ -317,12 +317,16 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             )
 
             "play_music" -> withContext(Dispatchers.IO) {
-                MusicActions.playMusic(context, a.optString("query", ""), a.optBoolean("shuffle", false))
+                MusicActions.playMusic(
+                    context, a.optString("query", ""), a.optBoolean("shuffle", false),
+                    a.optStringOrNull("mood"), a.optStringOrNull("genre")
+                )
             }
             "music_control" -> MusicActions.control(context, a.optString("action", ""))
             "set_volume" -> MusicActions.setVolume(
                 context, a.optString("action", ""), a.optIntOrNull("percent"), a.optStringOrNull("stream")
             )
+            "music_tags" -> withContext(Dispatchers.IO) { MusicActions.tags(context, a.optString("action", "")) }
             "music_library" -> withContext(Dispatchers.IO) {
                 MusicActions.library(context, a.optStringOrNull("query"))
             }
