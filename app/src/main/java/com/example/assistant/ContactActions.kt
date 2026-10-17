@@ -81,13 +81,14 @@ object ContactActions {
     }
 
     /** Звонит. Если разрешён прямой вызов, набирает сразу, иначе открывает набор номера. */
-    fun call(context: Context, query: String): String {
+    fun call(context: Context, query: String, confirmed: Boolean = false): String {
         if (!hasContactsPermission(context)) return NEED_PERMISSION
         return when (val p = pick(load(context), query)) {
             Pick.None -> "Контакт «$query» не нашёл."
             is Pick.Many -> "Нашёл несколько: ${describeMany(p.contacts)}. Скажи точнее, кому звонить."
             is Pick.One -> {
                 val number = p.contact.numbers.first()
+                if (!confirmed) return Confirm.ask("Позвонить: ${p.contact.name} ($number)?")
                 if (hasCallPermission(context)) {
                     val intent = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", number, null))
                     if (PhoneActions.launch(context, intent)) "Звоню: ${p.contact.name} ($number)"

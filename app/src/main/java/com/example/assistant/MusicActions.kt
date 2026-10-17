@@ -139,7 +139,8 @@ object MusicActions {
         action: String,
         name: String?,
         queries: List<String>,
-        shuffle: Boolean
+        shuffle: Boolean,
+        confirmed: Boolean = false
     ): String {
         val playlists = PlaylistStore.load(context)
         val title = name?.trim().orEmpty()
@@ -200,6 +201,7 @@ object MusicActions {
 
             "delete" -> {
                 if (existing == null) return notFound(title, playlists)
+                if (!confirmed) return Confirm.ask("Удалить плейлист «$existing»? Сами песни останутся на телефоне.")
                 playlists.remove(existing)
                 PlaylistStore.save(context, playlists)
                 "Удалил плейлист «$existing»"

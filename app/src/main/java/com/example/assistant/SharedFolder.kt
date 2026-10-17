@@ -199,14 +199,21 @@ object SharedFolder {
         return if (base.contains('.')) base else "$base.$ext"
     }
 
+    private fun outFile(name: String) = File(outbox(), name.replace(Regex("[\\\\:*?\"<>|]"), "_"))
+
+    /** Есть ли уже такой файл в Исходящих (перезапись требует подтверждения). */
+    fun outputExists(name: String): Boolean = ensure() && outFile(outputName(name, name, "txt")).exists()
+
+    private fun overwriteQuestion(name: String) = Confirm.ask("Файл «$name» уже есть в Исходящих. Перезаписать его?")
+
     private fun saveCsv(name: String, rows: List<List<String>>): String {
-        val target = File(outbox(), name.replace(Regex("[\\\\:*?\"<>|]"), "_"))
+        val target = outFile(name)
         target.writeText("\uFEFF" + FileConvert.toCsv(rows))
         return "$NAME/$OUTBOX/${target.name}"
     }
 
     /** Склеивает несколько таблиц (csv, xlsx) в один csv в Исходящих. */
-    fun merge(names: List<String>, output: String?, dedupe: Boolean): String {
+    fun merge(names: List<String>, output: String?, dedupe: Boolean, overwrite: Boolean = false): String {
         if (!ensure()) return NO_ACCESS
         if (names.size < 2) return "Назови минимум два файла для объединения."
         val tables = ArrayList<List<List<String>>>()
@@ -215,8 +222,10 @@ object SharedFolder {
             tables.add(readTable(f) ?: return "«${f.name}» не таблица (нужен csv или xlsx).")
         }
         val rows = FileConvert.merge(tables, dedupe)
+        val outName = outputName(output, "объединённое.csv", "csv")
+        if (!overwrite && outFile(outName).exists()) return overwriteQuestion(outName)
         return try {
-            val path = saveCsv(outputName(output, "объединённое.csv", "csv"), rows)
+            val path = saveCsv(outName, rows)
             "Объединил ${names.size} файла, строк с заголовком: ${rows.size}. Сохранил в $path"
         } catch (e: Exception) {
             "Не получилось сохранить: ${e.message}"
@@ -224,14 +233,20 @@ object SharedFolder {
     }
 
     /** xlsx превращает в csv, docx в txt (результат в Исходящих). */
-    fun convert(name: String, output: String?): String {
+    fun convert(name: String, output: String?, overwrite: Boolean = false): String {
         if (!ensure()) return NO_ACCESS
         val f = find(name) ?: return notFound(name)
         return try {
             when (f.extension.lowercase()) {
-                "xlsx" -> "Готово: " + saveCsv(outputName(output, f.nameWithoutExtension + ".csv", "csv"), FileConvert.xlsxRows(f))
+                "xlsx" -> {
+                    val outName = outputName(output, f.nameWithoutExtension + ".csv", "csv")
+                    if (!overwrite && outFile(outName).exists()) return overwriteQuestion(outName)
+                    "Готово: " + saveCsv(outName, FileConvert.xlsxRows(f))
+                }
                 "docx" -> {
-                    val target = File(outbox(), outputName(output, f.nameWithoutExtension + ".txt", "txt"))
+                    val outName = outputName(output, f.nameWithoutExtension + ".txt", "txt")
+                    if (!overwrite && outFile(outName).exists()) return overwriteQuestion(outName)
+                    val target = outFile(outName)
                     target.writeText(FileConvert.docxText(f))
                     "Готово: $NAME/$OUTBOX/${target.name}"
                 }
@@ -252,13 +267,14 @@ object SharedFolder {
     }
 
     /** Сохраняет распознанный текст в Исходящие: таблицу как csv, остальное как txt. */
-    fun saveRecognized(name: String, text: String): String {
+    fun saveRecognized(name: String, text: String, overwrite: Boolean = false): String {
         if (!ensure()) return NO_ACCESS
         return try {
             if (name.endsWith(".csv", ignoreCase = true)) {
+                if (!overwrite && outFile(name).exists()) return overwriteQuestion(name)
                 "Сохранил в " + saveCsv(name, FileConvert.parseCsv(text))
             } else {
-                write(name, text, append = false)
+                write(name, text, append = false, overwrite = overwrite)
             }
         } catch (e: Exception) {
             "Не получилось сохранить: ${e.message}"
@@ -333,12 +349,17 @@ object SharedFolder {
     // ---------------------------------------------------------------- запись
 
     /** Сохраняет текст в Исходящие. Входящие не трогает. */
-    fun write(name: String, content: String, append: Boolean): String {
+    fun write(name: String, content: String, append: Boolean, overwrite: Boolean = false): String {
         if (!ensure()) return NO_ACCESS
         val clean = name.trim().substringAfterLast('/').substringAfterLast('\\').replace(Regex("[\\\\:*?\"<>|]"), "_")
         if (clean.isEmpty() || clean.startsWith(".")) return "Нужно нормальное имя файла."
         if (content.length > MAX_WRITE_CHARS) return "Слишком большой текст для одного файла."
         val file = File(outbox(), clean)
+        if (file.exists() && !overwrite) {
+            return Confirm.ask(
+                if (append) "Дописать текст в файл «${file.name}» в Исходящих?" else "Файл «${file.name}» уже есть в Исходящих. Перезаписать его?"
+            )
+        }
         return try {
             if (append) file.appendText(content) else file.writeText(content)
             "Сохранил в $NAME/$OUTBOX/${file.name}"

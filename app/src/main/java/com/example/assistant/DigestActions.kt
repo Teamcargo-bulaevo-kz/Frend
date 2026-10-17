@@ -40,12 +40,15 @@ object DigestActions {
         return "Регулярные сводки:\n" + items.joinToString("\n") { "• %02d:%02d — %s".format(it.hour, it.minute, it.topic) }
     }
 
-    fun cancel(context: Context, query: String?): String {
+    fun cancel(context: Context, query: String?, confirmed: Boolean = false): String {
         val all = load(context)
         if (all.isEmpty()) return "Регулярных сводок нет."
         val q = TextMatch.normalize(query.orEmpty())
         val remove = if (q.isEmpty() || q == "все" || q == "всё") all else all.filter { TextMatch.normalize(it.topic).contains(q) }
         if (remove.isEmpty()) return "Не нашёл сводку «$query»."
+        if (!confirmed) {
+            return Confirm.ask("Отменить регулярные сводки (${remove.size}): " + remove.take(3).joinToString("; ") { "«${it.topic.take(50)}»" } + "?")
+        }
         remove.forEach { (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pending(context, it)) }
         save(context, all - remove.toSet())
         return "Отменил сводок: ${remove.size}"

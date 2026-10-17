@@ -101,46 +101,50 @@ class WakeWordService : Service() {
         return START_STICKY
     }
 
+    private val listener = object : RecognitionListener {
+        override fun onResults(results: Bundle?) {
+            val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
+            handle(texts)
+        }
+
+        override fun onError(error: Int) {
+            when (error) {
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> setEnabled(this@WakeWordService, false)
+                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> restart(600)
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> restart(2000)
+                else -> restart(4000)
+            }
+        }
+
+        override fun onReadyForSpeech(params: Bundle?) {}
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {}
+        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+    }
+
     private fun listen() {
         if (stopped) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             stopSelf()
             return
         }
-        recognizer?.destroy()
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
-                    handle(texts)
-                }
-
-                override fun onError(error: Int) {
-                    when (error) {
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> setEnabled(this@WakeWordService, false)
-                        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> restart(300)
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> restart(1500)
-                        else -> restart(3000)
-                    }
-                }
-
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-            startListening(
-                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-                }
-            )
+        // Распознаватель создаём один раз и переиспользуем: пересоздавать его каждые полсекунды тяжело для телефона
+        val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also {
+            it.setRecognitionListener(listener)
+            recognizer = it
         }
+        r.cancel()
+        r.startListening(
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            }
+        )
     }
 
     private fun restart(delayMs: Long) {
@@ -149,7 +153,7 @@ class WakeWordService : Service() {
     }
 
     private fun handle(texts: List<String>) {
-        if (texts.isEmpty()) return restart(300)
+        if (texts.isEmpty()) return restart(600)
 
         // «Джарвис, включи музыку» или просто «Джарвис»
         for (t in texts) {
@@ -166,7 +170,7 @@ class WakeWordService : Service() {
             awaitingUntil = 0
             return run(texts.first())
         }
-        restart(300)
+        restart(600)
     }
 
     private fun run(command: String) {

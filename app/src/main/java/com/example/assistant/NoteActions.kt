@@ -31,11 +31,16 @@ object NoteActions {
         return notes.joinToString("\n") { "• ${it.text} (${dateFormat.format(it.createdAt)})" }
     }
 
-    suspend fun deleteNote(context: Context, query: String): String {
+    suspend fun deleteNote(context: Context, query: String, confirmed: Boolean = false): String {
         if (query.isBlank()) return "Не указано, какую заметку удалить"
         val dao = NoteDatabase.getInstance(context).noteDao()
         val matches = dao.search(query.trim())
         if (matches.isEmpty()) return "Не нашёл заметку по запросу «$query», ничего не удалено"
+        if (!confirmed) {
+            val shown = matches.take(3).joinToString("; ") { "«${it.text.take(60)}»" }
+            val more = if (matches.size > 3) " и ещё ${matches.size - 3}" else ""
+            return Confirm.ask("Удалить заметки (${matches.size}): $shown$more?")
+        }
         matches.forEach { dao.delete(it) }
         return if (matches.size == 1) {
             "Удалил заметку: «${matches.first().text}»"

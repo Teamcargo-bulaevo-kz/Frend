@@ -43,4 +43,18 @@ class ContactMatchTest {
         org.junit.Assert.assertEquals("", WakeWord.commandAfter("джарвис"))
         org.junit.Assert.assertNull(WakeWord.commandAfter("включи музыку"))
     }
+
+    @Test fun confirmWords() {
+        assertTrue(Confirm.isYes("Да"))
+        assertTrue(Confirm.isYes("да, удаляй"))
+        assertTrue(Confirm.isYes("подтверждаю"))
+        assertFalse(Confirm.isYes("нет"))
+        assertFalse(Confirm.isYes("да не надо совсем"))
+        assertTrue(Confirm.isNo("нет"))
+        assertTrue(Confirm.isNo("не надо"))
+        assertTrue(Confirm.isNo("Отмена"))
+        assertFalse(Confirm.isNo("да"))
+        assertTrue(Confirm.isAsk(Confirm.ask("Удалить?")))
+        org.junit.Assert.assertEquals("Удалить?", Confirm.question(Confirm.ask("Удалить?")))
+    }
 }

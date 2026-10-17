@@ -78,13 +78,16 @@ object ReminderActions {
     }
 
     /** Отменяет напоминания, в тексте которых есть query; «все» или пусто — все. */
-    fun cancel(context: Context, query: String?): String {
+    fun cancel(context: Context, query: String?, confirmed: Boolean = false): String {
         val all = load(context)
         if (all.isEmpty()) return "Напоминаний нет."
         val q = TextMatch.normalize(query.orEmpty())
         val remove = if (q.isEmpty() || q == "все" || q == "всё") all
         else all.filter { TextMatch.normalize(it.text).contains(q) }
         if (remove.isEmpty()) return "Не нашёл напоминание «$query»."
+        if (!confirmed) {
+            return Confirm.ask("Отменить напоминания (${remove.size}): " + remove.take(3).joinToString("; ") { "«${it.text.take(50)}»" } + "?")
+        }
         remove.forEach { cancelAlarm(context, it) }
         save(context, all - remove.toSet())
         return "Отменил напоминаний: ${remove.size}"

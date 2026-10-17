@@ -21,7 +21,17 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         // Общие для всех экземпляров: сводку одновременно собирает только один
         val summaryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val summarizing = AtomicBoolean(false)
+
+        /** Действие, которое ждёт ответа «да» или «нет»; живёт 5 минут. */
+        @Volatile var pendingState: Pending? = null
+        const val CONFIRM_TTL_MS = 5 * 60_000L
     }
+
+    class PendingAction(val name: String, val args: JSONObject)
+    class Pending(val actions: List<PendingAction>, val at: Long)
+
+    /** Опасные действия, которые функции запросили подтвердить в ходе этого запроса. */
+    private val asks = mutableListOf<PendingAction>()
 
     private val client = GroqClient(apiKey)
     private val summaryBatch = 12
@@ -52,6 +62,27 @@ class AssistantRepository(private val context: Context, apiKey: String) {
      * 3. Обычная беседа: длинная история и сжатый список функций.
      */
     suspend fun handle(prompt: String): String {
+        // Ответ на вопрос «Удалить? Скажи да или нет»
+        val waiting = pendingState
+        if (waiting != null) {
+            pendingState = null
+            if (System.currentTimeMillis() - waiting.at < CONFIRM_TTL_MS) {
+                if (Confirm.isYes(prompt)) {
+                    return waiting.actions.joinToString("\n") { execute(it.name, it.args, confirmed = true) }
+                }
+                if (Confirm.isNo(prompt)) return "Хорошо, отменил."
+            }
+        }
+        asks.clear()
+        val answer = handleInner(prompt)
+        if (asks.isNotEmpty()) {
+            pendingState = Pending(asks.toList(), System.currentTimeMillis())
+            return answer + "\nСкажи «да» или «нет»."
+        }
+        return answer
+    }
+
+    private suspend fun handleInner(prompt: String): String {
         val normalized = normalize(prompt)
 
         // Уровень 1: правила
@@ -214,12 +245,12 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         return optStringOrNull(key)?.let { listOf(it) } ?: emptyList()
     }
 
-    private fun sharedFolder(a: JSONObject): String = when (a.optString("action", "list")) {
+    private fun sharedFolder(a: JSONObject, confirmed: Boolean): String = when (a.optString("action", "list")) {
         "read" -> SharedFolder.read(context, a.optString("name", ""), a.optStringOrNull("query"))
         "sql" -> SharedFolder.sql(a.optString("name", ""), a.optString("sql", ""))
-        "write" -> SharedFolder.write(a.optString("name", ""), a.optString("content", ""), a.optBoolean("append", false))
-        "merge" -> SharedFolder.merge(a.optStringList("names"), a.optStringOrNull("output"), a.optBoolean("dedupe", false))
-        "convert" -> SharedFolder.convert(a.optString("name", ""), a.optStringOrNull("output"))
+        "write" -> SharedFolder.write(a.optString("name", ""), a.optString("content", ""), a.optBoolean("append", false), confirmed)
+        "merge" -> SharedFolder.merge(a.optStringList("names"), a.optStringOrNull("output"), a.optBoolean("dedupe", false), confirmed)
+        "convert" -> SharedFolder.convert(a.optString("name", ""), a.optStringOrNull("output"), confirmed)
         else -> SharedFolder.list(context, a.optStringOrNull("folder"))
     }
 
@@ -239,7 +270,10 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     }
 
     /** Распознаёт текст на картинке из общей папки моделью с «зрением». */
-    private suspend fun recognizeImage(name: String?, task: String?, saveAs: String?): String {
+    private suspend fun recognizeImage(name: String?, task: String?, saveAs: String?, confirmed: Boolean): String {
+        if (!saveAs.isNullOrBlank() && !confirmed && withContext(Dispatchers.IO) { SharedFolder.outputExists(saveAs) }) {
+            return Confirm.ask("Файл «$saveAs» уже есть в Исходящих. Перезаписать его результатом распознавания?")
+        }
         val file = withContext(Dispatchers.IO) { SharedFolder.imageFile(name) }
             ?: return "Не нашёл картинку. Положи её во Входящие или прикрепи в чате кнопкой 📎."
         val encoded = withContext(Dispatchers.IO) { ImageUtil.jpegBase64(file) }
@@ -248,12 +282,21 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             " Отвечай только результатом, без пояснений."
         val text = client.vision(encoded, prompt)
         if (saveAs.isNullOrBlank()) return text
-        val saved = withContext(Dispatchers.IO) { SharedFolder.saveRecognized(saveAs, text) }
+        val saved = withContext(Dispatchers.IO) { SharedFolder.saveRecognized(saveAs, text, confirmed) }
         return "$saved\n\n" + text.take(600)
     }
 
     /** Выполняет одну функцию. Никогда не бросает исключений: ошибка возвращается текстом. */
-    private suspend fun execute(name: String, a: JSONObject): String = try {
+    private suspend fun execute(name: String, a: JSONObject, confirmed: Boolean = false): String {
+        val result = executeRaw(name, a, confirmed)
+        if (Confirm.isAsk(result)) {
+            asks.add(PendingAction(name, a))
+            return Confirm.question(result)
+        }
+        return result
+    }
+
+    private suspend fun executeRaw(name: String, a: JSONObject, confirmed: Boolean): String = try {
         when (name) {
             "set_alarm" -> PhoneActions.setAlarm(
                 context, a.optInt("hour", 0), a.optInt("minute", 0), a.optStringOrNull("label")
@@ -284,7 +327,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "playlist" -> withContext(Dispatchers.IO) {
                 MusicActions.playlist(
                     context, a.optString("action", ""), a.optStringOrNull("name"),
-                    a.optStringList("queries"), a.optBoolean("shuffle", false)
+                    a.optStringList("queries"), a.optBoolean("shuffle", false), confirmed
                 )
             }
 
@@ -302,11 +345,11 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
 
             "shared_folder" -> when (a.optString("action", "list")) {
-                "ocr" -> recognizeImage(a.optStringOrNull("name"), a.optStringOrNull("task"), a.optStringOrNull("save_as"))
-                else -> withContext(Dispatchers.IO) { sharedFolder(a) }
+                "ocr" -> recognizeImage(a.optStringOrNull("name"), a.optStringOrNull("task"), a.optStringOrNull("save_as"), confirmed)
+                else -> withContext(Dispatchers.IO) { sharedFolder(a, confirmed) }
             }
 
-            "call_contact" -> withContext(Dispatchers.IO) { ContactActions.call(context, a.optString("name", "")) }
+            "call_contact" -> withContext(Dispatchers.IO) { ContactActions.call(context, a.optString("name", ""), confirmed) }
             "message_contact" -> withContext(Dispatchers.IO) {
                 ContactActions.message(context, a.optString("name", ""), a.optStringOrNull("text"), a.optStringOrNull("app"))
             }
@@ -315,7 +358,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "web_search" -> client.webSearch(a.optString("query", ""))
             "schedule_digest" -> DigestActions.add(context, a.optString("topic", ""), a.optStringOrNull("time"))
             "list_digests" -> DigestActions.list(context)
-            "cancel_digest" -> DigestActions.cancel(context, a.optStringOrNull("query"))
+            "cancel_digest" -> DigestActions.cancel(context, a.optStringOrNull("query"), confirmed)
             "set_brightness" -> withContext(Dispatchers.IO) {
                 SystemActions.brightness(context, a.optIntOrNull("percent"), a.optStringOrNull("change"))
             }
@@ -326,7 +369,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 context, a.optString("text", ""), a.optIntOrNull("in_minutes"), a.optStringOrNull("date"), a.optStringOrNull("time")
             )
             "list_reminders" -> ReminderActions.list(context)
-            "cancel_reminder" -> ReminderActions.cancel(context, a.optStringOrNull("query"))
+            "cancel_reminder" -> ReminderActions.cancel(context, a.optStringOrNull("query"), confirmed)
             "calendar_add" -> withContext(Dispatchers.IO) {
                 CalendarActions.add(
                     context, a.optString("title", ""), a.optStringOrNull("date"), a.optStringOrNull("time"),
@@ -340,7 +383,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "create_note" -> NoteActions.createNote(context, a.optString("text", ""))
             "list_notes" -> NoteActions.listNotes(context)
             "search_notes" -> NoteActions.searchNotes(context, a.optString("query", ""))
-            "delete_note" -> NoteActions.deleteNote(context, a.optString("query", ""))
+            "delete_note" -> NoteActions.deleteNote(context, a.optString("query", ""), confirmed)
             else -> "Неизвестная функция: $name"
         }
     } catch (e: Exception) {
