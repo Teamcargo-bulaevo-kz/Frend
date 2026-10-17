@@ -68,7 +68,9 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             pendingState = null
             if (System.currentTimeMillis() - waiting.at < CONFIRM_TTL_MS) {
                 if (Confirm.isYes(prompt)) {
-                    return waiting.actions.joinToString("\n") { execute(it.name, it.args, confirmed = true) }
+                    val done = ArrayList<String>()
+                    for (action in waiting.actions) done.add(execute(action.name, action.args, confirmed = true))
+                    return done.joinToString("\n")
                 }
                 if (Confirm.isNo(prompt)) return "Хорошо, отменил."
             }
