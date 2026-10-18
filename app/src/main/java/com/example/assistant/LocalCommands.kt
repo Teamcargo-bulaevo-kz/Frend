@@ -39,6 +39,7 @@ object LocalCommands {
         parseBrightness(t, w)?.let { return it }
         parseVolume(t, w)?.let { return it }
         parsePlayerControl(t)?.let { return it }
+        parseRate(t)?.let { return it }
         parsePlaylistAndLibrary(t)?.let { return it }
         parseMusicPlay(t)?.let { return it }
         parseSharedList(t, w)?.let { return it }
@@ -424,6 +425,25 @@ object LocalCommands {
         return null
     }
 
+    private val likePhrases = setOf(
+        "лайк", "поставь лайк", "поставь лайк этой песне", "поставь лайк песне", "мне нравится эта песня", "нравится эта песня",
+        "эта песня мне нравится", "мне нравится", "понравилась", "мне понравилась эта песня", "добавь в любимые",
+        "в любимые", "добавь эту песню в любимые", "сердечко", "поставь сердечко"
+    )
+    private val dislikePhrases = setOf(
+        "дизлайк", "поставь дизлайк", "не нравится", "мне не нравится", "не нравится эта песня", "эта песня мне не нравится",
+        "мне не нравится эта песня", "не включай эту песню", "больше не включай эту песню", "больше не включай это", "не понравилась"
+    )
+
+    /** Лайк, дизлайк и «эта песня грустная». */
+    private fun parseRate(t: String): LocalCommand? {
+        if (t in likePhrases) return LocalCommand("music_rate", mapOf("action" to "like"))
+        if (t in dislikePhrases) return LocalCommand("music_rate", mapOf("action" to "dislike"))
+        val m = Regex("^(?:эта песня|эта|песня|это) (\\p{L}+)$").find(t) ?: return null
+        val mood = MusicTags.moodFromWords(m.groupValues[1]) ?: return null
+        return LocalCommand("music_rate", mapOf("action" to "tag", "moods" to listOf(mood)))
+    }
+
     private val playKeywords = setOf("песню", "песни", "трек", "треки", "композицию", "альбом", "исполнителя", "группу", "музыку")
 
     private fun parseMusicPlay(t: String): LocalCommand? {
@@ -448,6 +468,13 @@ object LocalCommands {
         val joined = rest.joinToString(" ")
         if (joined in setOf("музыку", "что нибудь", "что нить", "музон", "музыка")) {
             return LocalCommand("play_music", mapOf("query" to "", "shuffle" to true))
+        }
+        // «включи любимое», «включи мои любимые песни», «включи любимое спокойное»
+        if (rest.size <= 4 && (joined.contains("любим") || joined.contains("понравивш"))) {
+            val args = mutableMapOf<String, Any?>("query" to "", "shuffle" to true, "liked" to true)
+            MusicTags.moodFromWords(joined)?.let { args["mood"] = it }
+            MusicTags.genreFromWords(joined)?.let { args["genre"] = it }
+            return LocalCommand("play_music", args)
         }
         // «включи спокойную музыку», «поставь что-нибудь энергичное», «включи рок»
         if (rest.size <= 4 && rest[0] !in setOf("песню", "трек", "композицию", "альбом", "исполнителя", "группу")) {

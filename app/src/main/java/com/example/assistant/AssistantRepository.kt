@@ -151,7 +151,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     private suspend fun runLocal(command: LocalCommand): String? {
         if (command.name == "say") return command.args["text"] as? String
         val args = JSONObject()
-        for ((key, value) in command.args) args.put(key, value)
+        for ((key, value) in command.args) args.put(key, if (value is Collection<*>) JSONArray(value.toList()) else value)
         val result = execute(command.name, args)
         // Приложение не нашлось по названию: пусть разберётся модель (она знает, как оно называется на значке)
         if (command.name == "open_app" && result.startsWith("Не нашёл")) return null
@@ -319,13 +319,19 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "play_music" -> withContext(Dispatchers.IO) {
                 MusicActions.playMusic(
                     context, a.optString("query", ""), a.optBoolean("shuffle", false),
-                    a.optStringOrNull("mood"), a.optStringOrNull("genre")
+                    a.optStringOrNull("mood"), a.optStringOrNull("genre"), a.optBoolean("liked", false)
                 )
             }
             "music_control" -> MusicActions.control(context, a.optString("action", ""))
             "set_volume" -> MusicActions.setVolume(
                 context, a.optString("action", ""), a.optIntOrNull("percent"), a.optStringOrNull("stream")
             )
+            "music_rate" -> withContext(Dispatchers.IO) {
+                MusicActions.rate(
+                    context, a.optString("action", ""), a.optStringOrNull("query"), a.optStringList("moods"),
+                    a.optStringOrNull("genre"), a.optIntOrNull("energy"), a.optStringOrNull("tempo")
+                )
+            }
             "music_tags" -> withContext(Dispatchers.IO) { MusicActions.tags(context, a.optString("action", "")) }
             "music_library" -> withContext(Dispatchers.IO) {
                 MusicActions.library(context, a.optStringOrNull("query"))
@@ -333,7 +339,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "playlist" -> withContext(Dispatchers.IO) {
                 MusicActions.playlist(
                     context, a.optString("action", ""), a.optStringOrNull("name"),
-                    a.optStringList("queries"), a.optBoolean("shuffle", false), confirmed
+                    a.optStringList("queries"), a.optBoolean("shuffle", false), confirmed,
+                    a.optBoolean("current", false), a.optStringOrNull("target")
                 )
             }
 

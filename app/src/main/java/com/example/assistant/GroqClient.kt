@@ -86,20 +86,28 @@ class GroqClient(private val apiKey: String) {
      * Поиск свежей информации в интернете: встроенный инструмент browser_search моделей gpt-oss на Groq
      * (тот же ключ). Возвращает короткий ответ с названиями источников.
      */
-    suspend fun webSearch(query: String): String = withContext(Dispatchers.IO) {
+    suspend fun webSearch(query: String): String {
         val system = "Найди в интернете актуальную информацию и ответь по-русски кратко, не больше 120 слов: главное, цифры и даты. " +
             "В конце назови 1–3 источника по названию сайта. Если данных нет, так и скажи. Ответ начни со слова «ИТОГ:»."
+        return webAsk(system, query, 2000)
+    }
+
+    /**
+     * Запрос с обязательным поиском в интернете. В system нужно попросить начать итоговый ответ со слова «ИТОГ:»;
+     * возвращается текст после этого маркера.
+     */
+    suspend fun webAsk(system: String, user: String, maxTokens: Int): String = withContext(Dispatchers.IO) {
         fun body(extras: Boolean) = JSONObject().apply {
             put("model", model)
             put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", system + " Сейчас: " +
                     SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ru")).format(Date()) + " (${TimeZone.getDefault().id})."))
-                .put(JSONObject().put("role", "user").put("content", query)))
+                .put(JSONObject().put("role", "user").put("content", user)))
             put("tools", JSONArray().put(JSONObject().put("type", "browser_search")))
             put("tool_choice", "required")
             if (extras) {
                 put("reasoning_effort", "low")
-                put("max_completion_tokens", 2000)
+                put("max_completion_tokens", maxTokens)
             }
         }
         val response = try {
@@ -112,7 +120,7 @@ class GroqClient(private val apiKey: String) {
         if (content.isEmpty()) return@withContext "Поиск ничего не вернул."
         // В content бывают выдержки из найденных страниц, а итог идёт после маркера
         val marker = content.lastIndexOf("ИТОГ:")
-        (if (marker >= 0) content.substring(marker + 5) else content.takeLast(1500)).trim()
+        (if (marker >= 0) content.substring(marker + 5) else content.takeLast(maxOf(1500, maxTokens / 2))).trim()
     }
 
     /** Модели Groq, которые понимают картинки. Если первая недоступна, пробуем следующую. */

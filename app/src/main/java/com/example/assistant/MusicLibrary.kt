@@ -17,7 +17,8 @@ data class MusicTrack(
     val title: String,
     val artist: String,
     val album: String = "",
-    val isMusic: Boolean = true
+    val isMusic: Boolean = true,
+    val dateAdded: Long = 0
 ) {
     val uri: Uri
         get() = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
@@ -60,7 +61,8 @@ object MusicLibrary {
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
-            MediaStore.Audio.Media.IS_MUSIC
+            MediaStore.Audio.Media.IS_MUSIC,
+            MediaStore.Audio.Media.DATE_ADDED
         )
         // Музыка, а также любое длинное аудио (альбомы без тегов, скачанное из мессенджеров).
         // Рингтоны, будильники и уведомления не берём.
@@ -79,6 +81,7 @@ object MusicLibrary {
                 val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val musicCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.IS_MUSIC)
+                val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 while (cursor.moveToNext()) {
                     val artist = cursor.getString(artistCol).orEmpty()
                     result += MusicTrack(
@@ -86,7 +89,8 @@ object MusicLibrary {
                         title = cursor.getString(titleCol) ?: "Без названия",
                         artist = if (artist == "<unknown>") "" else artist,
                         album = cursor.getString(albumCol).orEmpty(),
-                        isMusic = cursor.getInt(musicCol) != 0
+                        isMusic = cursor.getInt(musicCol) != 0,
+                        dateAdded = cursor.getLong(addedCol)
                     )
                 }
             }
@@ -211,6 +215,15 @@ object PlaylistStore {
     }
 
     /** Находит название плейлиста без учёта регистра. */
-    fun findName(playlists: Map<String, *>, name: String): String? =
-        playlists.keys.firstOrNull { it.equals(name.trim(), ignoreCase = true) }
+    fun findName(playlists: Map<String, *>, name: String): String? {
+        playlists.keys.firstOrNull { it.equals(name.trim(), ignoreCase = true) }?.let { return it }
+        // «бег» и «для бега»: единственное название, которое содержит запрос или содержится в нём
+        val q = TextMatch.normalize(name)
+        if (q.length < 3) return null
+        val close = playlists.keys.filter { k ->
+            val n = TextMatch.normalize(k)
+            n.isNotEmpty() && (n.contains(q) || q.contains(n))
+        }
+        return close.singleOrNull()
+    }
 }

@@ -22,8 +22,11 @@ object MusicActions {
 
     // ---------------------------------------------------------------- воспроизведение
 
-    fun playMusic(context: Context, query: String, shuffle: Boolean, mood: String? = null, genre: String? = null): String {
+    fun playMusic(
+        context: Context, query: String, shuffle: Boolean, mood: String? = null, genre: String? = null, liked: Boolean = false
+    ): String {
         val index = MusicLibrary.index(context)
+        if (liked) return playLiked(context, index.allMusic(), mood, genre)
         if (mood != null || genre != null) return playByTags(context, index.allMusic(), mood, genre)
         val blank = query.isBlank()
         val found = if (blank) index.allMusic() else index.search(query, 100)
@@ -31,7 +34,9 @@ object MusicActions {
             return if (blank) NO_ACCESS else "Не нашёл на телефоне ничего похожего на «$query»"
         }
         // «Включи музыку» без уточнений — вся музыка вперемешку (не больше 300 треков в очереди)
-        val tracks = if (shuffle || blank) found.shuffled().take(300) else found
+        // Без уточнений дизлайкнутые песни не включаем
+        val pool = if (blank) found.filter { MusicTags.likedOf(context, it) >= 0 }.ifEmpty { found } else found
+        val tracks = if (shuffle || blank) pool.shuffled().take(300) else pool
         startPlayback(context, tracks)
         val first = tracks.first()
         val name = if (first.artist.isBlank()) first.title else "${first.artist} — ${first.title}"
@@ -58,6 +63,82 @@ object MusicActions {
         return "Включаю подборку ($label): «$name», всего ${tracks.size}"
     }
 
+    /** «Включи любимое»: песни с лайком, при желании ещё и по настроению или жанру. */
+    private fun playLiked(context: Context, music: List<MusicTrack>, mood: String?, genre: String?): String {
+        if (music.isEmpty()) return NO_ACCESS
+        val liked = music.filter { MusicTags.likedOf(context, it) > 0 }.filter { t ->
+            val tags = MusicTags.get(context, t)
+            (mood == null || (tags != null && mood in tags.moods)) && (genre == null || tags?.genre == genre)
+        }
+        if (liked.isEmpty()) {
+            return "Любимых песен пока нет. Нажми ♥ в плеере или скажи «поставь лайк этой песне»."
+        }
+        val tracks = liked.shuffled().take(300)
+        startPlayback(context, tracks)
+        val first = tracks.first()
+        return "Включаю любимое: «${if (first.artist.isBlank()) first.title else first.artist + " — " + first.title}», всего ${tracks.size}"
+    }
+
+    private fun nameOf(t: MusicTrack) = if (t.artist.isBlank()) t.title else "${t.artist} — ${t.title}"
+
+    /** Песня, о которой речь: названная или та, что играет сейчас. */
+    private fun target(context: Context, query: String?): Pair<MusicTrack?, String?> {
+        val q = query?.trim().orEmpty()
+        if (q.isEmpty()) {
+            val now = PlayerState.track
+            return if (now != null) now to null else null to "Сейчас ничего не играет. Скажи название песни."
+        }
+        val found = MusicLibrary.index(context).search(q, 1).firstOrNull()
+        return if (found != null) found to null else null to "Не нашёл на телефоне «$q»"
+    }
+
+    /** Лайк, дизлайк и ручная правка характеристик песни (голосом). */
+    fun rate(
+        context: Context, action: String, query: String?, moods: List<String>, genre: String?, energy: Int?, tempo: String?
+    ): String {
+        val (track, error) = target(context, query)
+        if (track == null) return error ?: "Не нашёл песню"
+        val name = nameOf(track)
+        return when (action.trim().lowercase()) {
+            "like" -> { MusicTags.setLiked(context, track, 1); "Поставил ♥ песне «$name»" }
+            "dislike" -> { MusicTags.setLiked(context, track, -1); "Отметил «$name» как не нравится: в подборках её не будет" }
+            "clear" -> { MusicTags.setLiked(context, track, 0); "Снял оценку с «$name»" }
+            "info" -> {
+                val tg = MusicTags.get(context, track)
+                if (!MusicTags.isTagged(tg) || tg == null) "«$name» ещё не размечена"
+                else "«$name»: ${tg.genreText.lowercase()}, ${tg.moods.joinToString(", ") { MusicTags.moodShort[it]?.lowercase() ?: it }}, " +
+                    "энергия ${tg.energy} из 5" + (if (tg.tempo.isNotBlank()) ", ${tg.tempo}" else "") +
+                    (if (tg.liked > 0) ", в любимых" else "") + (if (tg.needsReview) ". Я в этом не уверен" else "")
+            }
+            "tag" -> {
+                val newMoods = moods.mapNotNull { m -> m.trim().lowercase().takeIf { it in MusicTags.moods } ?: MusicTags.moodFromWords(m) }
+                    .distinct()
+                val newGenre = genre?.trim()?.lowercase()?.let { g -> g.takeIf { it in MusicTags.genres } ?: MusicTags.genreFromWords(g) }
+                val tempoKey = tempo?.let { MusicTags.tempoKey(it) }
+                if (newMoods.isEmpty() && newGenre == null && energy == null && tempoKey == null) {
+                    return "Не понял, что поменять. Назови настроение, жанр, энергичность или темп."
+                }
+                MusicTags.update(context, track) { old ->
+                    old.copy(
+                        moods = if (newMoods.isNotEmpty()) newMoods.toSet() else old.moods,
+                        mood = if (newMoods.isNotEmpty()) newMoods.first() else old.mood,
+                        genre = newGenre ?: old.genre,
+                        genreLabel = if (newGenre != null) "" else old.genreLabel,
+                        energy = energy?.coerceIn(1, 5) ?: old.energy,
+                        tempo = tempoKey?.let { MusicTags.tempos[it] } ?: old.tempo
+                    )
+                }
+                "Запомнил для «$name»: " + listOfNotNull(
+                    newMoods.takeIf { it.isNotEmpty() }?.joinToString(", ") { MusicTags.moodShort[it]?.lowercase() ?: it },
+                    newGenre?.let { MusicTags.genres[it]?.lowercase() },
+                    energy?.let { "энергия $it из 5" },
+                    tempoKey?.let { MusicTags.tempos[it] }
+                ).joinToString(", ")
+            }
+            else -> "Неизвестное действие: $action"
+        }
+    }
+
     /** Разметка музыки и выгрузка полного списка песен. */
     fun tags(context: Context, action: String): String {
         val music = MusicLibrary.index(context).allMusic()
@@ -65,21 +146,15 @@ object MusicActions {
         return when (action.trim().lowercase()) {
             "analyze" -> MusicTagger.start(context)
             "status" -> MusicTags.summary(context, music) + if (MusicTagger.running) "\n" + MusicTagger.progressText() else ""
-            "export" -> exportList(context, music)
+            "export" -> exportList(context)
             else -> "Неизвестное действие: $action"
         }
     }
 
-    private fun exportList(context: Context, music: List<MusicTrack>): String {
-        val rows = ArrayList<List<String>>()
-        rows.add(listOf("Исполнитель", "Название", "Альбом", "Жанр", "Настроение", "Энергичность (1-5)"))
-        for (t in music.sortedWith(compareBy({ it.artist.lowercase() }, { it.title.lowercase() }))) {
-            val tg = MusicTags.get(context, t)
-            rows.add(listOf(t.artist, t.title, t.album, tg?.let { MusicTags.genres[it.genre] }.orEmpty(),
-                tg?.let { MusicTags.moods[it.mood] }.orEmpty(), tg?.energy?.toString().orEmpty()))
-        }
-        val result = SharedFolder.write("songs.csv", "\uFEFF" + FileConvert.toCsv(rows), append = false, overwrite = true)
-        return "Список из ${music.size} песен сохранён в Исходящие как songs.csv. $result"
+    private fun exportList(context: Context): String {
+        val ok = MusicCatalog.exportNow(context)
+        return if (ok) "Таблица со всеми песнями, жанрами и настроениями обновлена: Assistant/${MusicCatalog.FILE_NAME}"
+        else "Нет доступа к общей папке Assistant. Разреши доступ ко всем файлам в настройках."
     }
 
     /** Что есть в музыкальной библиотеке: сводка или результаты поиска по запросу. */
@@ -185,74 +260,141 @@ object MusicActions {
         name: String?,
         queries: List<String>,
         shuffle: Boolean,
-        confirmed: Boolean = false
+        confirmed: Boolean = false,
+        current: Boolean = false,
+        targetName: String? = null
     ): String {
         val playlists = PlaylistStore.load(context)
         val title = name?.trim().orEmpty()
         val existing = if (title.isEmpty()) null else PlaylistStore.findName(playlists, title)
 
+        /** Песни, о которых просили: та, что играет сейчас, и найденные по запросам. */
+        fun requested(): Pair<List<MusicTrack>, List<String>> {
+            val (found, missing) = collect(context, queries)
+            val now = if (current) listOfNotNull(PlayerState.track) else emptyList()
+            return (now + found).distinctBy { it.id } to missing
+        }
+        val noSong = "Не указано, какие песни. Назови их или скажи «эту песню», когда она играет"
+
         return when (action.trim().lowercase()) {
             "list" -> {
                 if (playlists.isEmpty()) {
-                    "Плейлистов пока нет"
+                    "Папок и плейлистов пока нет"
                 } else {
                     playlists.entries.joinToString("\n") { "• ${it.key} — ${it.value.size} треков" }
                 }
             }
 
             "create" -> {
-                if (title.isEmpty()) return "Не указано название плейлиста"
+                if (title.isEmpty()) return "Не указано название"
                 if (existing != null) {
-                    return "Плейлист «$existing» уже есть. Могу добавить в него треки или удалить его"
+                    return "«$existing» уже есть. Могу добавить в неё песни или удалить её"
                 }
-                if (queries.isEmpty()) return "Не указано, какие треки или исполнителей добавить"
-                val (tracks, missing) = collect(context, queries)
-                if (tracks.isEmpty()) return "Не нашёл на телефоне ничего для плейлиста" + missingNote(missing)
+                val (tracks, missing) = requested()
+                if (tracks.isEmpty() && (queries.isNotEmpty() || current)) {
+                    return "Не нашёл на телефоне ничего для «$title»" + missingNote(missing)
+                }
                 playlists[title] = tracks.toMutableList()
                 PlaylistStore.save(context, playlists)
-                "Создал плейлист «$title»: ${tracks.size} треков" + missingNote(missing)
+                MusicCatalog.scheduleExport(context)
+                if (tracks.isEmpty()) "Создал пустую папку «$title». Добавляй в неё песни"
+                else "Создал «$title»: ${tracks.size} треков" + missingNote(missing)
             }
 
             "add" -> {
-                if (existing == null) return notFound(title, playlists)
-                if (queries.isEmpty()) return "Не указано, что добавить"
-                val (tracks, missing) = collect(context, queries)
+                if (existing == null) {
+                    // Нет такой папки: если просят добавить в новую, создаём её, чтобы не переспрашивать
+                    if (title.isEmpty()) return notFound(title, playlists)
+                    val (tracks, missing) = requested()
+                    if (tracks.isEmpty()) return noSong + missingNote(missing)
+                    playlists[title] = tracks.toMutableList()
+                    PlaylistStore.save(context, playlists)
+                    MusicCatalog.scheduleExport(context)
+                    return "Создал «$title» и добавил ${tracks.size} треков" + missingNote(missing)
+                }
+                val (tracks, missing) = requested()
+                if (tracks.isEmpty()) return noSong + missingNote(missing)
                 val list = playlists.getValue(existing)
                 val known = list.map { it.id }.toSet()
                 val added = tracks.filter { it.id !in known }
                 list += added
                 PlaylistStore.save(context, playlists)
-                "В плейлист «$existing» добавил ${added.size} треков, всего ${list.size}" + missingNote(missing)
+                MusicCatalog.scheduleExport(context)
+                "В «$existing» добавил ${added.size} треков, всего ${list.size}" + missingNote(missing)
+            }
+
+            "remove" -> {
+                if (existing == null) return notFound(title, playlists)
+                val (tracks, missing) = requested()
+                if (tracks.isEmpty()) return noSong + missingNote(missing)
+                val ids = tracks.map { it.id }.toSet()
+                val list = playlists.getValue(existing)
+                val before = list.size
+                list.removeAll { it.id in ids }
+                PlaylistStore.save(context, playlists)
+                MusicCatalog.scheduleExport(context)
+                "Убрал из «$existing» ${before - list.size} треков, осталось ${list.size}" + missingNote(missing)
+            }
+
+            "move" -> {
+                if (existing == null) return notFound(title, playlists)
+                val destTitle = targetName?.trim().orEmpty()
+                if (destTitle.isEmpty()) return "Не указано, куда переложить"
+                val (tracks, missing) = requested()
+                if (tracks.isEmpty()) return noSong + missingNote(missing)
+                val ids = tracks.map { it.id }.toSet()
+                val source = playlists.getValue(existing)
+                val moved = source.filter { it.id in ids }
+                if (moved.isEmpty()) return "В «$existing» этих песен нет" + missingNote(missing)
+                source.removeAll { it.id in ids }
+                val destName = PlaylistStore.findName(playlists, destTitle) ?: destTitle
+                val dest = playlists.getOrPut(destName) { mutableListOf() }
+                val known = dest.map { it.id }.toSet()
+                dest += moved.filter { it.id !in known }
+                PlaylistStore.save(context, playlists)
+                MusicCatalog.scheduleExport(context)
+                "Переложил ${moved.size} треков из «$existing» в «$destName»" + missingNote(missing)
+            }
+
+            "rename" -> {
+                if (existing == null) return notFound(title, playlists)
+                val newTitle = targetName?.trim().orEmpty()
+                if (newTitle.isEmpty()) return "Не указано новое название"
+                if (PlaylistStore.findName(playlists, newTitle).let { it != null && it != existing }) return "«$newTitle» уже есть"
+                val renamed = LinkedHashMap<String, MutableList<MusicTrack>>()
+                for ((k, v) in playlists) renamed[if (k == existing) newTitle else k] = v
+                PlaylistStore.save(context, renamed)
+                MusicCatalog.scheduleExport(context)
+                "Переименовал «$existing» в «$newTitle»"
             }
 
             "play" -> {
                 if (existing == null) return notFound(title, playlists)
-                val list = playlists.getValue(existing)
-                if (list.isEmpty()) return "Плейлист «$existing» пустой"
+                val list = playlists.getValue(existing).filter { MusicTags.likedOf(context, it) >= 0 }
+                if (list.isEmpty()) return "«$existing» пустая"
                 startPlayback(context, if (shuffle) list.shuffled() else list.toList())
-                "Включаю плейлист «$existing»: ${list.size} треков" + if (shuffle) ", вперемешку" else ""
+                "Включаю «$existing»: ${list.size} треков" + if (shuffle) ", вперемешку" else ""
             }
 
             "show" -> {
                 if (existing == null) return notFound(title, playlists)
                 val list = playlists.getValue(existing)
-                if (list.isEmpty()) return "Плейлист «$existing» пустой"
-                val lines = list.take(30).joinToString("\n") { t ->
-                    if (t.artist.isBlank()) "• ${t.title}" else "• ${t.artist} — ${t.title}"
-                }
+                if (list.isEmpty()) return "«$existing» пустая"
+                val lines = list.take(30).joinToString("\n") { t -> "• " + nameOf(t) }
                 val more = if (list.size > 30) "\n…и ещё ${list.size - 30}" else ""
                 "«$existing», ${list.size} треков:\n$lines$more"
             }
 
             "delete" -> {
                 if (existing == null) return notFound(title, playlists)
-                if (!confirmed) return Confirm.ask("Удалить плейлист «$existing»? Сами песни останутся на телефоне.")
+                if (!confirmed) return Confirm.ask("Удалить «$existing»? Сами песни останутся на телефоне.")
                 playlists.remove(existing)
                 PlaylistStore.save(context, playlists)
-                "Удалил плейлист «$existing»"
+                MusicCatalog.scheduleExport(context)
+                "Удалил «$existing»"
             }
 
-            else -> "Неизвестное действие с плейлистом: $action"
+            else -> "Неизвестное действие: $action"
         }
     }
 
@@ -272,8 +414,8 @@ object MusicActions {
         if (missing.isEmpty()) "" else ". Не нашёл: " + missing.joinToString(", ") { "«$it»" }
 
     private fun notFound(title: String, playlists: Map<String, *>): String = when {
-        title.isEmpty() -> "Не указано название плейлиста"
-        playlists.isEmpty() -> "Плейлистов пока нет"
-        else -> "Нет плейлиста «$title». Есть: " + playlists.keys.joinToString(", ") { "«$it»" }
+        title.isEmpty() -> "Не указано название папки или плейлиста"
+        playlists.isEmpty() -> "Папок и плейлистов пока нет"
+        else -> "Нет папки «$title». Есть: " + playlists.keys.joinToString(", ") { "«$it»" }
     }
 }

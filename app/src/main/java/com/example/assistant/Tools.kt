@@ -62,8 +62,24 @@ object Tools {
                     "query" to text("Название трека, исполнитель или альбом. Если пользователь просит просто включить музыку без уточнений, оставь пустым"),
                     "shuffle" to flag("true — играть вперемешку"),
                     "mood" to choice("Настроение музыки, если просят подобрать по настроению", MusicTags.moods.keys.toList()),
-                    "genre" to choice("Жанр, если просят музыку определённого жанра", MusicTags.genres.keys.toList())
+                    "genre" to choice("Жанр, если просят музыку определённого жанра", MusicTags.genres.keys.toList()),
+                    "liked" to flag("true — только любимые песни (с лайком)")
                 )
+            ))
+            put(tool(
+                "music_rate",
+                "Лайк, дизлайк и ручная правка характеристик песни. like — понравилась, dislike — не нравится (в подборки не попадёт), " +
+                    "clear — снять оценку, info — что известно о песне, tag — изменить настроение, жанр, энергичность или темп. " +
+                    "Если песня не названа, речь о той, что играет сейчас.",
+                listOf(
+                    "action" to choice("Что сделать", listOf("like", "dislike", "clear", "info", "tag")),
+                    "query" to text("Название песни или исполнитель. Пусто — текущая песня"),
+                    "moods" to list("Для tag: настроения из " + MusicTags.moods.keys.joinToString(", ")),
+                    "genre" to choice("Для tag: жанр", MusicTags.genres.keys.toList()),
+                    "energy" to number("Для tag: энергичность от 1 до 5"),
+                    "tempo" to choice("Для tag: темп", MusicTags.tempos.keys.toList())
+                ),
+                listOf("action")
             ))
             put(tool(
                 "music_tags",
@@ -91,12 +107,16 @@ object Tools {
             ))
             put(tool(
                 "playlist",
-                "Плейлисты. create — создать из списка запросов (названия треков или исполнители), add — добавить треки, " +
-                    "play — включить плейлист, show — показать треки, list — показать все плейлисты, delete — удалить.",
+                "Плейлисты и папки («для бега», «для прогулки» — это то же самое). create — создать (можно пустую), " +
+                    "add — добавить песни (если папки нет, она создастся), remove — убрать песни из папки, move — переложить песни " +
+                    "из одной папки в другую, rename — переименовать, play — включить, show — показать песни, list — все папки, delete — удалить. " +
+                    "Просьбу «убери из бега и добавь в прогулку» делай двумя вызовами (remove и add) или одним move.",
                 listOf(
-                    "action" to choice("Что сделать", listOf("create", "add", "play", "show", "list", "delete")),
-                    "name" to text("Название плейлиста"),
-                    "queries" to list("Для create и add: названия треков или исполнители, которые нужно найти на телефоне"),
+                    "action" to choice("Что сделать", listOf("create", "add", "remove", "move", "rename", "play", "show", "list", "delete")),
+                    "name" to text("Название папки или плейлиста (для move — откуда)"),
+                    "target" to text("Для move: в какую папку переложить. Для rename: новое название"),
+                    "queries" to list("Названия песен или исполнители, которые нужно найти на телефоне"),
+                    "current" to flag("true — взять песню, которая играет сейчас («эту песню», «текущую»)"),
                     "shuffle" to flag("Для play: true — играть вперемешку")
                 ),
                 listOf("action")
@@ -339,7 +359,7 @@ object Tools {
 
     private val groups: Map<String, List<String>> = mapOf(
         "alarm" to listOf("set_alarm"),
-        "music" to listOf("play_music", "music_control", "set_volume", "playlist", "music_library", "music_tags"),
+        "music" to listOf("play_music", "music_control", "set_volume", "playlist", "music_library", "music_tags", "music_rate"),
         "notes" to listOf("create_note", "list_notes", "search_notes", "delete_note"),
         "phone" to listOf(
             "flashlight", "open_camera", "take_screenshot", "open_app", "open_browser",
@@ -360,7 +380,8 @@ object Tools {
         "music" to listOf(
             "музык", "песн", "трек", "плейлист", "громк", "тише", "громче", "потише", "погромче", "пауз",
             "дальше", "следующ", "предыдущ", "играй", "альбом", "исполнител", "групп", "звук", "артист",
-            "настроени", "жанр", "разметк", "размет", "энергичн", "спокойн", "весел", "грустн"
+            "настроени", "жанр", "разметк", "размет", "энергичн", "спокойн", "весел", "грустн",
+            "лайк", "дизлайк", "нравит", "понравил", "любим", "папк", "коллекц", "эту песню", "эта песня"
         ),
         "notes" to listOf("заметк", "запомн", "запиш", "сохран", "удал"),
         "phone" to listOf(
