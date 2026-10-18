@@ -1,54 +1,150 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/drawer"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
-
-    <ScrollView
-        android:id="@+id/chatScrollView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <TextView
-            android:id="@+id/chatLogView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="15sp" />
-    </ScrollView>
+    android:fitsSystemWindows="true">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="12dp"
-        android:gravity="center_vertical">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="12dp">
 
-        <EditText
-            android:id="@+id/inputField"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/menuButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Чаты"
+                android:src="@android:drawable/ic_menu_sort_by_size" />
+
+            <TextView
+                android:id="@+id/chatTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Новый чат"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/newChatButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Новый чат"
+                android:src="@android:drawable/ic_menu_add" />
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/messageList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
             android:layout_weight="1"
-            android:hint="Например: поставь будильник на 7:30"
-            android:inputType="text" />
+            android:clipToPadding="false" />
 
-        <ImageButton
-            android:id="@+id/micButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Голосовой ввод"
-            android:src="@android:drawable/ic_btn_speak_now" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
+            <EditText
+                android:id="@+id/inputField"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Например: поставь будильник на 7:30"
+                android:inputType="textCapSentences|textMultiLine"
+                android:maxLines="4" />
+
+            <ImageButton
+                android:id="@+id/attachButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Прикрепить файл"
+                android:src="@android:drawable/ic_input_add" />
+
+            <ImageButton
+                android:id="@+id/micButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Голосовой ввод"
+                android:src="@android:drawable/ic_btn_speak_now" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/sendButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Отправить" />
     </LinearLayout>
 
-    <Button
-        android:id="@+id/sendButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Отправить" />
+    <LinearLayout
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="#FFFFFF"
+        android:clickable="true"
+        android:focusable="true"
+        android:orientation="vertical">
 
-</LinearLayout>
+        <Button
+            android:id="@+id/newChatDrawerButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="12dp"
+            android:text="＋ Новый чат" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="4dp"
+            android:text="Чаты (долгое нажатие — удалить)"
+            android:textColor="#6B6B70"
+            android:textSize="12sp" />
+
+        <ListView
+            android:id="@+id/chatsListView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="#E4E4E8"
+            android:dividerHeight="1dp" />
+
+        <CheckBox
+            android:id="@+id/speakCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="8dp"
+            android:text="Озвучивать ответы"
+            android:textColor="#1B1B1F" />
+
+        <CheckBox
+            android:id="@+id/wakeCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="8dp"
+            android:text="Слушать «Джарвис» (тратит заряд)"
+            android:textColor="#1B1B1F" />
+    </LinearLayout>
+</androidx.drawerlayout.widget.DrawerLayout>

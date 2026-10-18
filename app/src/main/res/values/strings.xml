@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">Нужна, чтобы по вашей команде ассистент мог сделать скриншот и нажать плитку в шторке (Wi-Fi, Bluetooth, режим полёта и т.д.). Экран служба не читает: шторка просматривается только в момент такой команды.</string>
+</resources>

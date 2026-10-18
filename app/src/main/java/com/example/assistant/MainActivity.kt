@@ -3,15 +3,26 @@ package com.example.assistant
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognizerIntent
+import android.view.View
+import android.widget.ArrayAdapter
+import android.provider.OpenableColumns
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.ScrollView
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.drawerlayout.widget.DrawerLayout
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -19,6 +30,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,8 +40,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var input: EditText
     private lateinit var sendButton: Button
     private lateinit var micButton: ImageButton
-    private lateinit var chatLog: TextView
-    private lateinit var chatScroll: ScrollView
+    private lateinit var drawer: DrawerLayout
+    private lateinit var chatTitle: TextView
+    private lateinit var messageList: RecyclerView
+    private lateinit var chatsListView: ListView
+    private val adapter = MessageAdapter()
+    private var chats: List<ChatInfo> = emptyList()
+    private var busy = false
 
     private val voiceLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) {
@@ -39,6 +56,19 @@ class MainActivity : AppCompatActivity() {
                 sendPrompt(recognized)
             }
         }
+    }
+
+    private val wakePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        findViewById<CheckBox>(R.id.wakeCheck).isChecked = granted
+        if (granted) {
+            WakeWordService.setEnabled(this, true)
+        } else {
+            Toast.makeText(this, "Без микрофона слово «Джарвис» не работает", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val attachLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) attachFile(uri)
     }
 
     private val recordAudioPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -56,14 +86,55 @@ class MainActivity : AppCompatActivity() {
         repository = AssistantRepository(applicationContext, BuildConfig.GROQ_API_KEY)
 
         requestMediaPermissionIfNeeded()
+        AssistantService.start(this)
 
         input = findViewById(R.id.inputField)
         sendButton = findViewById(R.id.sendButton)
         micButton = findViewById(R.id.micButton)
-        chatLog = findViewById(R.id.chatLogView)
-        chatScroll = findViewById(R.id.chatScrollView)
+        drawer = findViewById(R.id.drawer)
+        chatTitle = findViewById(R.id.chatTitle)
+        messageList = findViewById(R.id.messageList)
+        chatsListView = findViewById(R.id.chatsListView)
 
-        loadHistory()
+        messageList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+        messageList.adapter = adapter
+
+        findViewById<ImageButton>(R.id.attachButton).setOnClickListener { attachLauncher.launch("*/*") }
+
+        val speakCheck = findViewById<CheckBox>(R.id.speakCheck)
+        speakCheck.isChecked = Speaker.enabled(this)
+        speakCheck.setOnCheckedChangeListener { _, checked -> Speaker.setEnabled(this, checked) }
+
+        val wakeCheck = findViewById<CheckBox>(R.id.wakeCheck)
+        wakeCheck.isChecked = WakeWordService.enabled(this) && WakeWordService.hasMicPermission(this)
+        wakeCheck.setOnCheckedChangeListener { button, checked ->
+            if (!button.isPressed) return@setOnCheckedChangeListener
+            if (!checked) {
+                WakeWordService.setEnabled(this, false)
+            } else if (WakeWordService.hasMicPermission(this)) {
+                WakeWordService.setEnabled(this, true)
+            } else {
+                wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+
+        findViewById<ImageButton>(R.id.menuButton).setOnClickListener {
+            refreshChatList()
+            drawer.openDrawer(android.view.Gravity.START)
+        }
+        findViewById<ImageButton>(R.id.newChatButton).setOnClickListener { startNewChat() }
+        findViewById<Button>(R.id.newChatDrawerButton).setOnClickListener { startNewChat() }
+
+        chatsListView.setOnItemClickListener { _, _, position, _ ->
+            if (blockedWhileBusy()) return@setOnItemClickListener
+            ChatHistory.select(applicationContext, chats[position].id)
+            drawer.closeDrawers()
+            showCurrentChat()
+        }
+        chatsListView.setOnItemLongClickListener { _, _, position, _ ->
+            confirmDelete(chats[position])
+            true
+        }
 
         sendButton.setOnClickListener {
             val prompt = input.text.toString().trim()
@@ -80,34 +151,114 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadHistory() {
-        val history = ChatHistory.load(applicationContext)
-        for (m in history) {
-            appendToLog(m.role, m.text)
+    override fun onStart() {
+        super.onStart()
+        // Чат читаем заново: за время, пока приложение было свёрнуто, могли прийти голосовые команды из шторки
+        showCurrentChat()
+        WakeWordService.start(this)
+        uiScope.launch(Dispatchers.IO) {
+            // Музыка, которую система ещё не знает (скачанное, из мессенджеров), добавляется в медиатеку
+            MusicIndexer.scanNewFiles(applicationContext)
+            // Новые файлы в общей папке Assistant/Входящие: сообщаем в чате
+            val fresh = SharedFolder.takeNewFiles(applicationContext)
+            if (fresh.isNotEmpty()) {
+                val names = fresh.take(8).joinToString("\n") { "• ${it.name}" }
+                val more = if (fresh.size > 8) "\n… и ещё ${fresh.size - 8}" else ""
+                ChatHistory.append(
+                    applicationContext, "assistant",
+                    "Новые файлы во Входящих:\n$names$more\nСкажи, что с ними сделать (прочитать, найти, посчитать)."
+                )
+                launch(Dispatchers.Main) { showCurrentChat() }
+            }
         }
     }
 
-    private fun sendPrompt(prompt: String) {
-        input.setText("")
-        appendToLog("user", prompt)
-        ChatHistory.append(applicationContext, "user", prompt)
+    // ---------------------------------------------------------------- чаты
 
+    private fun showCurrentChat() {
+        val context = applicationContext
+        chatTitle.text = ChatHistory.currentTitle(context)
+        val history = ChatHistory.load(context)
+        adapter.setAll(history)
+        scrollToEnd()
+    }
+
+    private fun refreshChatList() {
+        chats = ChatHistory.list(applicationContext)
+        val current = ChatHistory.currentId(applicationContext)
+        chatsListView.adapter = object : ArrayAdapter<ChatInfo>(this, R.layout.item_chat, R.id.chatTitleItem, chats) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val view = super.getView(position, convertView, parent)
+                val item = chats[position]
+                (view as TextView).apply {
+                    text = item.title
+                    setBackgroundColor(if (item.id == current) 0xFFE3ECFF.toInt() else 0x00000000)
+                }
+                return view
+            }
+        }
+    }
+
+    private fun startNewChat() {
+        if (blockedWhileBusy()) return
+        ChatHistory.create(applicationContext)
+        drawer.closeDrawers()
+        showCurrentChat()
+    }
+
+    private fun confirmDelete(chat: ChatInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("Удалить чат?")
+            .setMessage("«${chat.title}» удалится вместе со всей перепиской.")
+            .setPositiveButton("Удалить") { _, _ ->
+                val wasCurrent = chat.id == ChatHistory.currentId(applicationContext)
+                if (wasCurrent && blockedWhileBusy()) return@setPositiveButton
+                ChatHistory.delete(applicationContext, chat.id)
+                refreshChatList()
+                if (wasCurrent) showCurrentChat()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    /** Пока ассистент отвечает, чат не переключаем: ответ должен попасть в тот же чат. */
+    private fun blockedWhileBusy(): Boolean {
+        if (busy) Toast.makeText(this, "Подожди ответа ассистента", Toast.LENGTH_SHORT).show()
+        return busy
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (drawer.isDrawerOpen(android.view.Gravity.START)) drawer.closeDrawers() else super.onBackPressed()
+    }
+
+    private fun scrollToEnd() {
+        messageList.post { if (adapter.itemCount > 0) messageList.scrollToPosition(adapter.itemCount - 1) }
+    }
+
+    private fun sendPrompt(prompt: String) {
+        if (busy) return
+        input.setText("")
+        val chatId = ChatHistory.currentId(applicationContext)
+        ChatHistory.append(applicationContext, "user", prompt, chatId)
+        chatTitle.text = ChatHistory.currentTitle(applicationContext)
+        adapter.add(ChatMessage("user", prompt, System.currentTimeMillis()))
+        scrollToEnd()
+
+        busy = true
         sendButton.isEnabled = false
         micButton.isEnabled = false
 
         uiScope.launch {
             val answer = repository.handle(prompt)
-            appendToLog("assistant", answer)
-            ChatHistory.append(applicationContext, "assistant", answer)
+            ChatHistory.append(applicationContext, "assistant", answer, chatId)
+            if (Speaker.enabled(applicationContext)) Speaker.speak(applicationContext, answer)
+            adapter.add(ChatMessage("assistant", answer, System.currentTimeMillis()))
+            scrollToEnd()
+            busy = false
             sendButton.isEnabled = true
             micButton.isEnabled = true
         }
-    }
-
-    private fun appendToLog(role: String, text: String) {
-        val prefix = if (role == "user") "Вы: " else "Ассистент: "
-        chatLog.append("\n$prefix$text\n")
-        chatScroll.post { chatScroll.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
     private fun launchVoiceRecognition() {
@@ -123,14 +274,87 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestMediaPermissionIfNeeded() {
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_AUDIO
-        } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
+    /** Копирует выбранный файл во Входящие общей папки, чтобы с ним можно было работать. */
+    private fun attachFile(uri: Uri) {
+        uiScope.launch {
+            val message = withContext(Dispatchers.IO) {
+                if (!SharedFolder.ensure()) {
+                    return@withContext "Нет доступа ко всем файлам, поэтому некуда сохранить. Разреши его для Assistant в настройках."
+                }
+                try {
+                    var name = "файл"
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) c.getString(0)?.let { name = it }
+                    }
+                    name = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                    var target = java.io.File(SharedFolder.inbox(), name)
+                    var n = 1
+                    while (target.exists()) {
+                        target = java.io.File(SharedFolder.inbox(), "${target.nameWithoutExtension.replace(Regex(" \\(\\d+\\)$"), "")} ($n).${target.extension}".removeSuffix("."))
+                        n++
+                    }
+                    contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                        ?: return@withContext "Не получилось открыть файл."
+                    SharedFolder.markSeen(applicationContext, target)
+                    val hint = if (target.extension.lowercase() in SharedFolder.imageExtensions) {
+                        "Напиши, что сделать: например «распознай текст на ${target.name}»."
+                    } else {
+                        "Скажи, что с ним сделать."
+                    }
+                    "Добавил «${target.name}» во Входящие. $hint"
+                } catch (e: Exception) {
+                    "Не получилось добавить файл: ${e.message}"
+                }
+            }
+            ChatHistory.append(applicationContext, "assistant", message)
+            adapter.add(ChatMessage("assistant", message, System.currentTimeMillis()))
+            scrollToEnd()
         }
-        if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(permission), 1001)
+    }
+
+    private fun requestMediaPermissionIfNeeded() {
+        val wanted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.READ_MEDIA_AUDIO,
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        val extra = arrayOf(
+            Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR
+        )
+        val missing = (wanted + extra).filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
+        } else {
+            askAllFilesAccessOnce()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) askAllFilesAccessOnce()
+    }
+
+    /** Один раз открывает настройки «Все файлы», чтобы ассистент видел файлы и всю музыку. */
+    private fun askAllFilesAccessOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()) return
+        val prefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
+        if (prefs.getBoolean("asked_all_files", false)) return
+        prefs.edit().putBoolean("asked_all_files", true).apply()
+        try {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
+            )
+            Toast.makeText(this, "Включи доступ ко всем файлам для Assistant и вернись назад", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            // нет такого экрана настроек — ассистент спросит позже, когда понадобится
         }
     }
 }

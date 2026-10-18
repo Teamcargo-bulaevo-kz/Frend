@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/music_bg" android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="20dp">
+
+        <TextView
+            android:id="@+id/editTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="@color/music_text" android:textSize="22sp" android:textStyle="bold" />
+        <TextView
+            android:id="@+id/editArtist" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="2dp" android:textColor="@color/music_text_dim" android:textSize="16sp" />
+        <TextView
+            android:id="@+id/editInfo" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:textColor="@color/music_accent" android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:orientation="horizontal">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/likeBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="♡ Нравится" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/dislikeBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                android:layout_weight="1" android:text="Не нравится" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp"
+            android:text="Настроение (можно несколько)" android:textColor="@color/music_text" android:textSize="15sp" android:textStyle="bold" />
+        <LinearLayout
+            android:id="@+id/moodBox" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+            android:text="Жанр" android:textColor="@color/music_text" android:textSize="15sp" android:textStyle="bold" />
+        <Spinner
+            android:id="@+id/genreSpinner" android:layout_width="match_parent" android:layout_height="48dp" />
+        <EditText
+            android:id="@+id/genreLabel" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="Своя подпись жанра (необязательно)" android:inputType="text"
+            android:textColor="@color/music_text" android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/energyText" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:textColor="@color/music_text" android:textSize="15sp" android:textStyle="bold" />
+        <SeekBar
+            android:id="@+id/energySeek" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:max="4" android:progressTint="@color/music_accent" android:thumbTint="@color/music_accent" />
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+            android:text="Темп" android:textColor="@color/music_text" android:textSize="15sp" android:textStyle="bold" />
+        <RadioGroup
+            android:id="@+id/tempoGroup" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+            android:text="Описание" android:textColor="@color/music_text" android:textSize="15sp" android:textStyle="bold" />
+        <EditText
+            android:id="@+id/descEdit" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="Коротко о песне" android:inputType="textMultiLine" android:maxLines="3"
+            android:textColor="@color/music_text" android:textSize="15sp" />
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+            android:text="Папки" android:textColor="@color/music_text" android:textSize="15sp" android:textStyle="bold" />
+        <LinearLayout
+            android:id="@+id/folderBox" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" />
+        <EditText
+            android:id="@+id/newFolder" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="Новая папка (необязательно)" android:inputType="text"
+            android:textColor="@color/music_text" android:textSize="15sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/saveBtn" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="24dp" android:text="Сохранить" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/confirmBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:text="Всё верно" android:visibility="gone" />
+    </LinearLayout>
+</ScrollView>
