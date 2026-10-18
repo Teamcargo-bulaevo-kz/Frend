@@ -227,6 +227,8 @@ object MusicTagger {
         notifyProgress(context)
         var failures = 0
         for (group in weak.chunked(WEB_BATCH)) {
+            // Запрос принципиально не проходит (слишком большой, не принят): больше эту группу не мучаем
+            var markTried = false
             val result = try {
                 withRetry { askWeb(client, group) }
             } catch (e: Stop) {
@@ -234,6 +236,7 @@ object MusicTagger {
                 throw e
             } catch (e: Exception) {
                 failures++
+                markTried = e is GroqApiException && e.code in setOf(400, 413, 422)
                 if (failures >= 3) throw Stop("поиск в интернете недоступен: ${e.message?.take(60)}")
                 null
             }
@@ -253,7 +256,7 @@ object MusicTagger {
                 }
             }
             if (result != null) failures = 0
-            if (updates.isNotEmpty() && result != null) MusicTags.putAll(context, updates)
+            if (updates.isNotEmpty() && (result != null || markTried)) MusicTags.putAll(context, updates)
             done += group.size
             notifyProgress(context)
             delay(4_000)

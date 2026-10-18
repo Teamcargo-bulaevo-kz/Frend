@@ -61,6 +61,10 @@ class MusicTagsTest {
         assertEquals("electronic", MusicTags.genreKeyFromLabel("Клубная электроника"))
         assertEquals("hiphop", MusicTags.genreKeyFromLabel("Хип-хоп"))
         assertEquals("other", MusicTags.genreKeyFromLabel("Что-то странное"))
+        assertEquals("electronic", MusicTags.genreKeyFromLabel("Фонк / бразильский фанк"))
+        assertEquals("electronic", MusicTags.genreKeyFromLabel("Slowed + reverb ремикс"))
+        assertEquals("electronic", MusicTags.genreKeyFromLabel("Электро / TikTok-ремикс"))
+        assertEquals("pop", MusicTags.genreKeyFromLabel("Русская лирика / ремикс"))
     }
 
     @Test fun cleansTitles() {

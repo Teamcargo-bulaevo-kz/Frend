@@ -156,7 +156,15 @@ class TrackEditActivity : AppCompatActivity() {
         val t = track ?: return
         val moods = moodBoxes.filterValues { it.isChecked }.keys.toList()
         if (moods.isEmpty()) {
-            Toast.makeText(this, "Выбери хотя бы одно настроение", Toast.LENGTH_SHORT).show()
+            if (MusicTags.isTagged(MusicTags.get(this, t))) {
+                Toast.makeText(this, "Выбери хотя бы одно настроение", Toast.LENGTH_SHORT).show()
+            } else {
+                // Песня не размечена, а нужен только лайк или папки
+                MusicTags.setLiked(this, t, liked)
+                saveFolders(t)
+                Toast.makeText(this, "Сохранено", Toast.LENGTH_SHORT).show()
+                finish()
+            }
             return
         }
         val genre = genreKeys[genreSpinner.selectedItemPosition.coerceIn(0, genreKeys.lastIndex)]
