@@ -3,7 +3,9 @@ package com.example.assistant
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -98,6 +100,11 @@ class MusicActivity : AppCompatActivity() {
         sort = Sort.values().firstOrNull { it.name == prefs().getString("sort", null) } ?: Sort.NAME
         sortButton.text = "Сортировка: ${sort.label}"
         sortButton.setOnClickListener { chooseSort() }
+        status.setOnClickListener {
+            if (!SharedFolder.hasAccess() && Build.VERSION.SDK_INT >= 30) {
+                startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+            }
+        }
 
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = adapter
@@ -272,6 +279,7 @@ class MusicActivity : AppCompatActivity() {
         val tab = tabs.selectedTabPosition.coerceAtLeast(0)
         val tagged = MusicTags.count(this)
         val parts = ArrayList<String>()
+        if (!SharedFolder.hasAccess()) parts.add("⚠ Нет доступа ко всем файлам: таблица Музыка.xlsx не сохранится при переустановке. Нажми сюда, чтобы разрешить.")
         if (running) parts.add("⏳ " + MusicTagger.progressText())
         else if (tagged < allTracks.size && tab in 1..2) parts.add("Размечено $tagged из ${allTracks.size}. Нажми «Разметить», чтобы определить остальные.")
         if (tab == reviewTab && drillTracks == null) parts.add("Здесь песни, в которых я не уверен. Открой, поправь или нажми «Всё верно».")

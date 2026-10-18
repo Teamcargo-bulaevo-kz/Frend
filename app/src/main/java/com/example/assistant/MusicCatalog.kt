@@ -116,22 +116,7 @@ object MusicCatalog {
         val rows = ArrayList<List<String>>()
         rows.add(header)
         val sorted = byKey.entries.sortedWith(compareBy({ it.value.artist.lowercase() }, { it.value.title.lowercase() }))
-        for ((key, r) in sorted) {
-            val tg = r.tags?.takeIf { MusicTags.isTagged(it) }
-            val liked = r.tags?.liked ?: 0
-            val folderText = folders[key]?.joinToString("; ").orEmpty()
-            if (tg == null) {
-                rows.add(listOf(r.artist, r.title, r.album, "", "Не определено", "", "", "", "", "", likedLabel(liked), folderText, ""))
-            } else {
-                val note = if (tg.note.isNotBlank()) tg.note else if (tg.needsReview) AUTO_NOTE else ""
-                rows.add(listOf(
-                    r.artist, r.title, r.album, tg.genreText,
-                    tg.moods.joinToString(", ") { MusicTags.moodShort[it] ?: it },
-                    tg.energy.toString(), tg.tempo, tg.description, confidenceLabel(tg.confidence),
-                    note, likedLabel(liked), folderText, sourceLabel(tg.source)
-                ))
-            }
-        }
+        for ((key, r) in sorted) rows.add(rowFor(r.artist, r.title, r.album, r.tags, folders[key].orEmpty()))
 
         val counts = LinkedHashMap<String, Int>()
         for (r in byKey.values) {
@@ -155,6 +140,21 @@ object MusicCatalog {
         return true
     }
 
+    /** Одна строка таблицы «Все песни». Чистая функция: по ней же проверяется чтение обратно. */
+    fun rowFor(artist: String, title: String, album: String, tags: TrackTags?, folders: List<String>): List<String> {
+        val tg = tags?.takeIf { MusicTags.isTagged(it) }
+        val liked = likedLabel(tags?.liked ?: 0)
+        val folderText = folders.joinToString("; ")
+        if (tg == null) return listOf(artist, title, album, "", "Не определено", "", "", "", "", "", liked, folderText, "")
+        val note = if (tg.note.isNotBlank()) tg.note else if (tg.needsReview) AUTO_NOTE else ""
+        return listOf(
+            artist, title, album, tg.genreText,
+            tg.moods.joinToString(", ") { MusicTags.moodShort[it] ?: it },
+            tg.energy.toString(), tg.tempo, tg.description, confidenceLabel(tg.confidence),
+            note, liked, folderText, sourceLabel(tg.source)
+        )
+    }
+
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     // ---------------------------------------------------------------- чтение
@@ -175,15 +175,27 @@ object MusicCatalog {
         return n
     }
 
+    /** Результат разбора таблицы: изменённые теги по ключам песен и папки по ключам песен. */
+    class Parsed(val updates: Map<String, TrackTags>, val folders: List<Pair<String, List<String>>>)
+
     /** Читает таблицу в нашем или твоём формате songs_by_mood.xlsx. Возвращает число песен, у которых теги обновились. */
     fun importFrom(context: Context, file: File): Int {
         val rows = try { FileConvert.xlsxRows(file) } catch (e: Exception) { return 0 }
-        if (rows.size < 2) return 0
+        val parsed = parseRows(rows, MusicTags.all(context))
+        if (parsed.updates.isNotEmpty()) MusicTags.putAll(context, parsed.updates, export = false)
+        if (parsed.folders.isNotEmpty()) restoreFolders(context, parsed.folders)
+        return parsed.updates.size
+    }
+
+    /** Чистый разбор строк таблицы (первая — заголовок). Без Android, поэтому покрыт тестами. */
+    fun parseRows(rows: List<List<String>>, local: Map<String, TrackTags>): Parsed {
+        val empty = Parsed(emptyMap(), emptyList())
+        if (rows.size < 2) return empty
         val head = rows[0].map { it.trim().lowercase() }
         fun col(vararg names: String): Int = head.indexOfFirst { h -> names.any { h.contains(it) } }
         val cArtist = col("исполнитель")
         val cTitle = col("назван")
-        if (cArtist < 0 || cTitle < 0) return 0
+        if (cArtist < 0 || cTitle < 0) return empty
         val cAlbum = col("альбом")
         val cGenre = col("жанр")
         val cMood = col("настроен")
@@ -193,12 +205,12 @@ object MusicCatalog {
         val cConf = col("уверенн")
         val cNote = col("пометк")
         val cLiked = col("нравит")
-        val cFolders = col("папк")
+        // «Альбом (папка)» тоже содержит слово «папка», поэтому ищем колонку именно «Папки»
+        val cFolders = head.indexOfFirst { it == "папки" }
         val cSource = col("источник")
 
         fun cell(row: List<String>, c: Int) = if (c >= 0) row.getOrNull(c)?.trim().orEmpty() else ""
 
-        val local = MusicTags.all(context)
         val updates = LinkedHashMap<String, TrackTags>()
         val folderRows = ArrayList<Pair<String, List<String>>>()
         for (row in rows.drop(1)) {
@@ -242,14 +254,13 @@ object MusicCatalog {
                 moods = moods, genreLabel = if (genreLabel.equals(MusicTags.genres[genreKey], true)) "" else genreLabel,
                 tempo = cell(row, cTempo), description = cell(row, cDesc), confidence = conf, source = source,
                 liked = if (liked != 0) liked else (old?.liked ?: 0), edited = fileEdit || (old?.edited ?: false),
-                webTried = old?.webTried ?: false, note = if (noteText == AUTO_NOTE || noteText.startsWith("ИИ: уточни")) "" else noteText,
+                webTried = old?.webTried ?: false, aiTried = old?.aiTried ?: false,
+                note = if (noteText == AUTO_NOTE || noteText.startsWith("ИИ: уточни")) "" else noteText,
                 artist = artist, title = title, album = cell(row, cAlbum)
             )
             if (old != tags) updates[key] = tags
         }
-        if (updates.isNotEmpty()) MusicTags.putAll(context, updates, export = false)
-        if (folderRows.isNotEmpty()) restoreFolders(context, folderRows)
-        return updates.size
+        return Parsed(updates, folderRows)
     }
 
     /** Папки из таблицы возвращаются в плейлисты: песни ищутся на этом устройстве по исполнителю и названию. */

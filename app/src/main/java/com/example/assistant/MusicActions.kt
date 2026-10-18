@@ -140,15 +140,36 @@ object MusicActions {
     }
 
     /** Разметка музыки и выгрузка полного списка песен. */
-    fun tags(context: Context, action: String): String {
+    fun tags(context: Context, action: String, file: String? = null): String {
         val music = MusicLibrary.index(context).allMusic()
         if (music.isEmpty()) return NO_ACCESS
         return when (action.trim().lowercase()) {
             "analyze" -> MusicTagger.start(context)
             "status" -> MusicTags.summary(context, music) + if (MusicTagger.running) "\n" + MusicTagger.progressText() else ""
             "export" -> exportList(context)
+            "import" -> importTable(context, file)
             else -> "Неизвестное действие: $action"
         }
+    }
+
+    /** Подхватывает готовую таблицу (например, songs_by_mood.xlsx) из Входящих или из папки Assistant. */
+    private fun importTable(context: Context, file: String?): String {
+        if (!SharedFolder.ensure()) return "Нет доступа к общей папке Assistant. Разреши доступ ко всем файлам в настройках."
+        val dirs = listOf(SharedFolder.inbox(), SharedFolder.root())
+        val all = dirs.flatMap { d -> d.listFiles { f -> f.isFile && f.extension.lowercase() == "xlsx" }.orEmpty().toList() }
+        val wanted = file?.trim().orEmpty()
+        val source = (if (wanted.isNotEmpty()) {
+            all.firstOrNull { it.name.equals(wanted, true) || it.nameWithoutExtension.equals(wanted, true) }
+        } else {
+            all.filter { f ->
+                val n = f.name.lowercase()
+                n == MusicCatalog.FILE_NAME.lowercase() || "song" in n || "музык" in n || "mood" in n
+            }.maxByOrNull { it.lastModified() }
+        }) ?: return "Не нашёл таблицу. Положи xlsx во Входящие и скажи её имя."
+        val n = MusicCatalog.importFrom(context, source)
+        if (n == 0) return "В «${source.name}» не нашёл разметки (нужны колонки Исполнитель, Название, Настроение)."
+        MusicCatalog.scheduleExport(context)
+        return "Подхватил разметку из «${source.name}»: $n песен. " + MusicTagger.start(context)
     }
 
     private fun exportList(context: Context): String {

@@ -439,7 +439,7 @@ object LocalCommands {
     private fun parseRate(t: String): LocalCommand? {
         if (t in likePhrases) return LocalCommand("music_rate", mapOf("action" to "like"))
         if (t in dislikePhrases) return LocalCommand("music_rate", mapOf("action" to "dislike"))
-        val m = Regex("^(?:эта песня|эта|песня|это) (\\p{L}+)$").find(t) ?: return null
+        val m = Regex("^(?:эта песня|эта|песня) (\\p{L}+)$").find(t) ?: return null
         val mood = MusicTags.moodFromWords(m.groupValues[1]) ?: return null
         return LocalCommand("music_rate", mapOf("action" to "tag", "moods" to listOf(mood)))
     }

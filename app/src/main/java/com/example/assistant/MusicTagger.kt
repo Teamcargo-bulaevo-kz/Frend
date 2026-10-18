@@ -127,8 +127,9 @@ object MusicTagger {
             val key = MusicTags.trackKey(t)
             if (!seen.add(key)) continue
             val tags = MusicTags.get(context, t)
-            if (!MusicTags.isTagged(tags)) untagged++
-            else if (tags != null && !tags.edited && !tags.webTried && tags.confidence < WEB_BELOW) weak++
+            if (!MusicTags.isTagged(tags)) {
+                if (tags?.aiTried == true) { if (!tags.webTried) weak++ } else untagged++
+            } else if (tags != null && !tags.edited && !tags.webTried && tags.confidence < WEB_BELOW) weak++
         }
         return untagged to weak
     }
@@ -165,7 +166,10 @@ object MusicTagger {
     }
 
     private suspend fun phaseAi(context: Context, client: GroqClient, music: List<MusicTrack>) {
-        val todo = music.distinctBy { MusicTags.trackKey(it) }.filter { !MusicTags.isTagged(MusicTags.get(context, it)) }
+        val todo = music.distinctBy { MusicTags.trackKey(it) }.filter {
+            val tg = MusicTags.get(context, it)
+            !MusicTags.isTagged(tg) && tg?.aiTried != true
+        }
         phase = "Определяю настроение и жанр"
         total = todo.size
         done = 0
@@ -193,6 +197,15 @@ object MusicTagger {
                         liked = old?.liked ?: 0
                     )
                 }
+                // Модель пропустила песню: помечаем, что ИИ пробовал, и оставляем интернету
+                for (track in batch) {
+                    val key = MusicTags.trackKey(track)
+                    if (key !in tags && !MusicTags.isTagged(MusicTags.get(context, track))) {
+                        val old = MusicTags.get(context, track)
+                        tags[key] = (old ?: TrackTags("other", "calm", 3, confidence = 0, artist = track.artist, title = track.title, album = track.album))
+                            .copy(aiTried = true)
+                    }
+                }
                 if (tags.isNotEmpty()) MusicTags.putAll(context, tags)
             }
             done += batch.size
@@ -204,7 +217,8 @@ object MusicTagger {
     private suspend fun phaseWeb(context: Context, client: GroqClient, music: List<MusicTrack>) {
         val weak = music.distinctBy { MusicTags.trackKey(it) }.filter {
             val tg = MusicTags.get(context, it)
-            tg != null && MusicTags.isTagged(tg) && !tg.edited && !tg.webTried && tg.confidence < WEB_BELOW
+            tg != null && !tg.edited && !tg.webTried &&
+                ((MusicTags.isTagged(tg) && tg.confidence < WEB_BELOW) || (!MusicTags.isTagged(tg) && tg.aiTried))
         }
         if (weak.isEmpty()) return
         phase = "Уточняю через интернет"
@@ -374,8 +388,8 @@ object MusicTagger {
             if (review > 0) append(" Проверь $review песен, где я не уверен.")
             if (error != null) append(" Причина: $error.")
         }
-        if (error != null && error.contains("Groq")) {
-            // Лимит: не пытаемся автоматически минут 40, чтобы не стучаться впустую
+        if (error != null) {
+            // Ошибка или лимит: не пытаемся автоматически минут 40, чтобы не стучаться впустую
             prefs(context).edit().putLong(KEY_BLOCKED_UNTIL, System.currentTimeMillis() + 40 * 60_000L).apply()
         }
         val n = Notification.Builder(context, DONE_CHANNEL)

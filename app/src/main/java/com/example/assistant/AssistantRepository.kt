@@ -332,7 +332,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                     a.optStringOrNull("genre"), a.optIntOrNull("energy"), a.optStringOrNull("tempo")
                 )
             }
-            "music_tags" -> withContext(Dispatchers.IO) { MusicActions.tags(context, a.optString("action", "")) }
+            "music_tags" -> withContext(Dispatchers.IO) { MusicActions.tags(context, a.optString("action", ""), a.optStringOrNull("file")) }
             "music_library" -> withContext(Dispatchers.IO) {
                 MusicActions.library(context, a.optStringOrNull("query"))
             }

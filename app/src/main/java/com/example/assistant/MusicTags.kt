@@ -23,6 +23,7 @@ data class TrackTags(
     val liked: Int = 0,
     val edited: Boolean = false,
     val webTried: Boolean = false,
+    val aiTried: Boolean = false,
     val note: String = "",
     val artist: String = "",
     val title: String = "",
@@ -225,7 +226,7 @@ object MusicTags {
     private fun toJson(v: TrackTags) = JSONObject()
         .put("g", v.genre).put("m", v.mood).put("e", v.energy).put("ms", JSONArray(v.moods.toList()))
         .put("gl", v.genreLabel).put("t", v.tempo).put("d", v.description).put("c", v.confidence)
-        .put("s", v.source).put("l", v.liked).put("ed", v.edited).put("w", v.webTried).put("n", v.note)
+        .put("s", v.source).put("l", v.liked).put("ed", v.edited).put("w", v.webTried).put("at", v.aiTried).put("n", v.note)
         .put("ar", v.artist).put("ti", v.title).put("al", v.album)
 
     private fun fromJson(o: JSONObject): TrackTags {
@@ -237,6 +238,7 @@ object MusicTags {
             moods = moods.ifEmpty { setOf(mood) }, genreLabel = o.optString("gl"), tempo = o.optString("t"),
             description = o.optString("d"), confidence = o.optInt("c", 70), source = o.optString("s", TrackTags.SOURCE_AI),
             liked = o.optInt("l", 0), edited = o.optBoolean("ed", false), webTried = o.optBoolean("w", false),
+            aiTried = o.optBoolean("at", false),
             note = o.optString("n"), artist = o.optString("ar"), title = o.optString("ti"), album = o.optString("al")
         )
     }
