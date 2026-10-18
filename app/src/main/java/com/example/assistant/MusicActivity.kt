@@ -19,6 +19,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
@@ -31,20 +32,28 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Второе приложение «Музыка»: вся музыка телефона, настроения, жанры, исполнители, плейлисты и мини-плеер. */
+/** Второе приложение «Музыка»: вся музыка телефона, настроения, жанры, исполнители, папки, проверка разметки и мини-плеер. */
 class MusicActivity : AppCompatActivity() {
 
-    /** Строка списка: трек или группа (настроение, жанр, исполнитель, плейлист). */
+    /** Строка списка: трек или группа (настроение, жанр, исполнитель, папка). */
     private data class Row(
-        val title: String, val subtitle: String, val track: MusicTrack? = null, val onClick: () -> Unit
+        val title: String, val subtitle: String, val track: MusicTrack? = null,
+        val onLong: ((View) -> Unit)? = null, val onClick: () -> Unit
     )
 
-    private val tabNames = listOf("Треки", "Настроение", "Жанры", "Исполнители", "Плейлисты")
+    private enum class Sort(val label: String) {
+        NAME("по названию"), ARTIST("по исполнителю"), NEWEST("сначала новые"), OLDEST("сначала старые"), LIKED("любимые сверху")
+    }
+
+    private val tabNames = listOf("Треки", "Настроение", "Жанры", "Исполнители", "Папки", "Проверить")
+    private val reviewTab = 5
     private var allTracks: List<MusicTrack> = emptyList()
-    private var shown: List<MusicTrack> = emptyList()   // треки на экране (для очереди при нажатии)
     private var drillTitle: String? = null
     private var drillTracks: List<MusicTrack>? = null
+    private var drillFolder: String? = null
     private var rows: List<Row> = emptyList()
+    private var sort = Sort.NAME
+    private var wasTagging = false
     private val handler = Handler(Looper.getMainLooper())
 
     private lateinit var list: RecyclerView
@@ -52,6 +61,7 @@ class MusicActivity : AppCompatActivity() {
     private lateinit var search: EditText
     private lateinit var status: TextView
     private lateinit var screenTitle: TextView
+    private lateinit var sortButton: MaterialButton
     private lateinit var mini: LinearLayout
     private lateinit var miniProgress: ProgressBar
     private lateinit var miniTitle: TextView
@@ -63,9 +73,12 @@ class MusicActivity : AppCompatActivity() {
     private val ticker = object : Runnable {
         override fun run() {
             updateMini()
+            updateTaggingState()
             handler.postDelayed(this, 500)
         }
     }
+
+    private fun prefs() = getSharedPreferences("music_ui", MODE_PRIVATE)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,25 +88,31 @@ class MusicActivity : AppCompatActivity() {
         search = findViewById(R.id.search)
         status = findViewById(R.id.status)
         screenTitle = findViewById(R.id.screenTitle)
+        sortButton = findViewById(R.id.sortButton)
         mini = findViewById(R.id.miniPlayer)
         miniProgress = findViewById(R.id.miniProgress)
         miniTitle = findViewById(R.id.miniTitle)
         miniArtist = findViewById(R.id.miniArtist)
         miniPlay = findViewById(R.id.miniPlay)
 
+        sort = Sort.values().firstOrNull { it.name == prefs().getString("sort", null) } ?: Sort.NAME
+        sortButton.text = "Сортировка: ${sort.label}"
+        sortButton.setOnClickListener { chooseSort() }
+
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = adapter
         tabNames.forEach { tabs.addTab(tabs.newTab().setText(it)) }
         tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: TabLayout.Tab) { drillTracks = null; drillTitle = null; rebuild() }
+            override fun onTabSelected(tab: TabLayout.Tab) { leaveDrill(); rebuild() }
             override fun onTabUnselected(tab: TabLayout.Tab) {}
-            override fun onTabReselected(tab: TabLayout.Tab) { drillTracks = null; drillTitle = null; rebuild() }
+            override fun onTabReselected(tab: TabLayout.Tab) { leaveDrill(); rebuild() }
         })
         search.doAfterTextChanged { rebuild() }
 
         findViewById<MaterialButton>(R.id.shuffleAll).setOnClickListener {
-            if (allTracks.isEmpty()) return@setOnClickListener
-            startQueue(allTracks.shuffled().take(500), 0)
+            val pool = allTracks.filter { MusicTags.likedOf(this, it) >= 0 }.ifEmpty { allTracks }
+            if (pool.isEmpty()) return@setOnClickListener
+            startQueue(pool.shuffled().take(500), 0)
         }
         findViewById<MaterialButton>(R.id.tagButton).setOnClickListener {
             if (MusicTagger.running) {
@@ -115,7 +134,7 @@ class MusicActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (drillTracks != null) {
-                    drillTracks = null; drillTitle = null; rebuild()
+                    leaveDrill(); rebuild()
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
@@ -137,6 +156,12 @@ class MusicActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    private fun leaveDrill() {
+        drillTracks = null
+        drillTitle = null
+        drillFolder = null
+    }
+
     // ---------------------------------------------------------------- доступ и загрузка
 
     private fun audioPermission() =
@@ -146,7 +171,11 @@ class MusicActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(this, audioPermission()) == PackageManager.PERMISSION_GRANTED
 
     private fun requestAudioAccess() {
-        requestPermissions(arrayOf(audioPermission()), 1)
+        val wanted = ArrayList<String>()
+        wanted.add(audioPermission())
+        // Уведомление «музыка размечена» не покажется без этого разрешения
+        if (Build.VERSION.SDK_INT >= 33) wanted.add(Manifest.permission.POST_NOTIFICATIONS)
+        requestPermissions(wanted.toTypedArray(), 1)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -161,13 +190,46 @@ class MusicActivity : AppCompatActivity() {
         lifecycleScope.launch {
             allTracks = withContext(Dispatchers.IO) {
                 MusicLibrary.index(this@MusicActivity, force = true).allMusic()
-                    .sortedWith(compareBy({ it.title.lowercase() }, { it.artist.lowercase() }))
             }
             rebuild()
+            // Первый запуск и переустановка: сам подхватит таблицу и начнёт разметку того, что осталось
+            MusicTagger.autoStart(this@MusicActivity)
+            // Таблица могла подхватиться из файла: через пару секунд обновим список
+            handler.postDelayed({ rebuild() }, 3_000)
+            handler.postDelayed({ rebuild() }, 10_000)
+        }
+    }
+
+    // ---------------------------------------------------------------- сортировка
+
+    private fun chooseSort() {
+        val all = Sort.values()
+        AlertDialog.Builder(this).setTitle("Сортировка")
+            .setItems(all.map { it.label }.toTypedArray()) { _, which ->
+                sort = all[which]
+                prefs().edit().putString("sort", sort.name).apply()
+                sortButton.text = "Сортировка: ${sort.label}"
+                rebuild()
+            }.show()
+    }
+
+    private fun sortTracks(tracks: List<MusicTrack>): List<MusicTrack> {
+        val byName = compareBy<MusicTrack>({ it.title.lowercase() }, { it.artist.lowercase() })
+        return when (sort) {
+            Sort.NAME -> tracks.sortedWith(byName)
+            Sort.ARTIST -> tracks.sortedWith(compareBy<MusicTrack>({ it.artist.lowercase() }, { it.title.lowercase() }))
+            Sort.NEWEST -> tracks.sortedWith(compareByDescending<MusicTrack> { it.dateAdded }.then(byName))
+            Sort.OLDEST -> tracks.sortedWith(compareBy<MusicTrack> { it.dateAdded }.then(byName))
+            Sort.LIKED -> tracks.sortedWith(compareByDescending<MusicTrack> { MusicTags.likedOf(this, it) }.then(byName))
         }
     }
 
     // ---------------------------------------------------------------- построение списка
+
+    private fun reviewList(): List<MusicTrack> = allTracks.filter { t ->
+        val tg = MusicTags.get(this, t)
+        tg != null && MusicTags.isTagged(tg) && tg.needsReview
+    }.sortedBy { MusicTags.get(this, it)?.confidence ?: 0 }
 
     private fun rebuild() {
         if (allTracks.isEmpty()) {
@@ -178,25 +240,43 @@ class MusicActivity : AppCompatActivity() {
         }
         val query = TextMatch.normalize(search.text.toString())
         val tab = tabs.selectedTabPosition.coerceAtLeast(0)
-        val tagged = MusicTags.count(this)
-        val statusParts = ArrayList<String>()
-        if (MusicTagger.running) statusParts.add(MusicTagger.progressText())
-        else if (tagged < allTracks.size && tab in 1..2) statusParts.add("Размечено $tagged из ${allTracks.size}. Нажми «Разметить», чтобы определить настроение и жанр остальных.")
+        val review = reviewList()
+        tabs.getTabAt(reviewTab)?.text = if (review.isEmpty()) "Проверить" else "Проверить (${review.size})"
 
         val drill = drillTracks
         screenTitle.text = drillTitle ?: "Музыка"
+        sortButton.visibility = if (drill != null || query.isNotEmpty() || tab == 0) View.VISIBLE else View.GONE
         rows = when {
-            drill != null -> trackRows(applyQuery(drill, query))
-            query.isNotEmpty() -> trackRows(applyQuery(allTracks, query))
-            tab == 0 -> trackRows(allTracks)
-            tab == 1 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.mood }, MusicTags.moods)
-            tab == 2 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.genre }, MusicTags.genres)
+            drill != null -> trackRows(applyQuery(sortTracks(drill), query))
+            query.isNotEmpty() -> trackRows(applyQuery(sortTracks(allTracks), query))
+            tab == 0 -> trackRows(sortTracks(allTracks))
+            tab == 1 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.takeIf { t -> MusicTags.isTagged(t) }?.mood }, MusicTags.moods, multiMood = true)
+            tab == 2 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.takeIf { t -> MusicTags.isTagged(t) }?.genre }, MusicTags.genres)
             tab == 3 -> artistRows()
-            else -> playlistRows()
+            tab == 4 -> folderRows()
+            else -> reviewRows(review)
         }
-        status.visibility = if (statusParts.isEmpty()) View.GONE else View.VISIBLE
-        status.text = statusParts.joinToString("\n")
+        updateTaggingState(force = true)
         adapter.notifyDataSetChanged()
+    }
+
+    /** Строка состояния: ход разметки или подсказка по вкладке. */
+    private fun updateTaggingState(force: Boolean = false) {
+        val running = MusicTagger.running
+        if (wasTagging && !running) {
+            wasTagging = false
+            if (allTracks.isNotEmpty()) { rebuild(); return }
+        }
+        wasTagging = running
+        if (allTracks.isEmpty() && !force) return
+        val tab = tabs.selectedTabPosition.coerceAtLeast(0)
+        val tagged = MusicTags.count(this)
+        val parts = ArrayList<String>()
+        if (running) parts.add("⏳ " + MusicTagger.progressText())
+        else if (tagged < allTracks.size && tab in 1..2) parts.add("Размечено $tagged из ${allTracks.size}. Нажми «Разметить», чтобы определить остальные.")
+        if (tab == reviewTab && drillTracks == null) parts.add("Здесь песни, в которых я не уверен. Открой, поправь или нажми «Всё верно».")
+        status.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
+        status.text = parts.joinToString("\n")
     }
 
     private fun applyQuery(tracks: List<MusicTrack>, query: String): List<MusicTrack> {
@@ -211,18 +291,26 @@ class MusicActivity : AppCompatActivity() {
     private fun tagLine(t: MusicTrack): String {
         val tg = MusicTags.get(this, t)
         val base = t.artist.ifBlank { "Неизвестный исполнитель" }
-        return if (tg == null) base else "$base · ${MusicTags.moods[tg.mood]?.lowercase()} · ${MusicTags.genres[tg.genre]?.lowercase()}"
+        val mark = when {
+            tg != null && tg.liked > 0 -> "♥ "
+            tg != null && tg.liked < 0 -> "👎 "
+            else -> ""
+        }
+        if (tg == null || !MusicTags.isTagged(tg)) return mark + base
+        val moods = tg.moods.joinToString(", ") { MusicTags.moodShort[it]?.lowercase() ?: it }
+        return "$mark$base · $moods · ${tg.genreText.lowercase()}"
     }
 
-    private fun trackRows(tracks: List<MusicTrack>): List<Row> {
-        shown = tracks
-        return tracks.mapIndexed { i, t -> Row(t.title, tagLine(t), t) { startQueue(tracks, i) } }
-    }
+    private fun trackRows(tracks: List<MusicTrack>): List<Row> =
+        tracks.mapIndexed { i, t -> Row(t.title, tagLine(t), t) { startQueue(tracks, i) } }
 
-    private fun groupRows(groups: Map<String?, List<MusicTrack>>, names: Map<String, String>): List<Row> {
+    private fun groupRows(groups: Map<String?, List<MusicTrack>>, names: Map<String, String>, multiMood: Boolean = false): List<Row> {
         val result = ArrayList<Row>()
         for ((key, label) in names) {
-            val tracks = groups[key] ?: continue
+            val tracks = if (multiMood) {
+                allTracks.filter { t -> MusicTags.get(this, t)?.let { MusicTags.isTagged(it) && key in it.moods } == true }
+            } else groups[key] ?: continue
+            if (tracks.isEmpty()) continue
             result.add(Row(label, "${tracks.size} песен") { openGroup(label, tracks) })
         }
         groups[null]?.let { result.add(Row("Без разметки", "${it.size} песен") { openGroup("Без разметки", it) }) }
@@ -234,20 +322,27 @@ class MusicActivity : AppCompatActivity() {
             .sortedBy { it.key.lowercase() }
             .map { (name, tracks) -> Row(name, "${tracks.size} песен") { openGroup(name, tracks) } }
 
-    private fun playlistRows(): List<Row> {
-        val lists = PlaylistStore.load(this)
-        if (lists.isEmpty()) {
-            return listOf(Row("Плейлистов пока нет", "Создай: долгое нажатие на песню → «В плейлист»") {})
-        }
-        return lists.map { (name, tracks) ->
-            val resolved = tracks.mapNotNull { p -> allTracks.firstOrNull { it.id == p.id } }
-            Row(name, "${resolved.size} песен") { openGroup(name, resolved) }
-        }
+    private fun reviewRows(review: List<MusicTrack>): List<Row> = review.map { t ->
+        val tg = MusicTags.get(this, t)
+        val guess = tg?.let { "${it.moods.joinToString(", ") { m -> MusicTags.moodShort[m]?.lowercase() ?: m }} · ${it.genreText.lowercase()}" }.orEmpty()
+        Row(t.title, "${t.artist.ifBlank { "Неизвестный исполнитель" }} · $guess", t) { openEditor(t, review = true) }
     }
 
-    private fun openGroup(title: String, tracks: List<MusicTrack>) {
+    private fun folderRows(): List<Row> {
+        val lists = PlaylistStore.load(this)
+        val result = ArrayList<Row>()
+        result.add(Row("＋ Новая папка", "Для бега, для прогулки, любая своя") { askFolderName("Новая папка", "") { createFolder(it) } })
+        for ((name, tracks) in lists) {
+            val resolved = tracks.mapNotNull { p -> allTracks.firstOrNull { it.id == p.id } ?: allTracks.firstOrNull { MusicTags.trackKey(it) == MusicTags.trackKey(p) } }
+            result.add(Row(name, "${resolved.size} песен", onLong = { showFolderMenu(it, name) }) { openGroup(name, resolved, folder = name) })
+        }
+        return result
+    }
+
+    private fun openGroup(title: String, tracks: List<MusicTrack>, folder: String? = null) {
         drillTitle = title
         drillTracks = tracks
+        drillFolder = folder
         search.setText("")
         rebuild()
         list.scrollToPosition(0)
@@ -269,6 +364,14 @@ class MusicActivity : AppCompatActivity() {
         if (PlayerState.track != null || MusicService.isRunning) startActivity(Intent(this, PlayerActivity::class.java))
     }
 
+    private fun openEditor(track: MusicTrack, review: Boolean = false) {
+        startActivity(
+            Intent(this, TrackEditActivity::class.java)
+                .putExtra(TrackEditActivity.EXTRA_TRACK_ID, track.id)
+                .putExtra(TrackEditActivity.EXTRA_REVIEW, review)
+        )
+    }
+
     private fun updateMini() {
         val t = PlayerState.track
         if (t == null || !MusicService.isRunning) {
@@ -284,17 +387,26 @@ class MusicActivity : AppCompatActivity() {
         miniProgress.progress = PlayerState.position()
     }
 
+    // ---------------------------------------------------------------- меню песни и папок
+
     private fun showTrackMenu(anchor: View, track: MusicTrack) {
+        val liked = MusicTags.likedOf(this, track)
         val menu = PopupMenu(this, anchor)
         menu.menu.add(0, 1, 0, "Играть следующим")
         menu.menu.add(0, 2, 1, "В конец очереди")
-        menu.menu.add(0, 3, 2, "В плейлист")
-        menu.menu.add(0, 4, 3, "Характеристики")
+        menu.menu.add(0, 3, 2, if (liked > 0) "Убрать ♥" else "Нравится ♥")
+        menu.menu.add(0, 4, 3, if (liked < 0) "Вернуть в подборки" else "Не нравится")
+        menu.menu.add(0, 5, 4, "Изменить характеристики")
+        menu.menu.add(0, 6, 5, "В папку")
+        if (drillFolder != null) menu.menu.add(0, 7, 6, "Убрать из папки «${drillFolder}»")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1, 2 -> enqueue(track, item.itemId == 1)
-                3 -> addToPlaylist(track)
-                4 -> showTags(track)
+                3 -> { MusicTags.setLiked(this, track, if (liked > 0) 0 else 1); rebuild() }
+                4 -> { MusicTags.setLiked(this, track, if (liked < 0) 0 else -1); rebuild() }
+                5 -> openEditor(track)
+                6 -> addToFolder(track)
+                7 -> removeFromCurrentFolder(track)
             }
             true
         }
@@ -311,50 +423,96 @@ class MusicActivity : AppCompatActivity() {
         }
     }
 
-    private fun addToPlaylist(track: MusicTrack) {
-        val lists = PlaylistStore.load(this)
-        val names = lists.keys.toList()
-        val input = EditText(this).apply { hint = "Новый плейлист" }
-        val builder = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("В плейлист")
-        if (names.isNotEmpty()) {
-            builder.setItems((names + "Новый плейлист…").toTypedArray()) { _, which ->
-                if (which < names.size) savePlaylist(names[which], track) else askNewPlaylist(track)
-            }
-        } else {
-            askNewPlaylist(track)
+    private fun addToFolder(track: MusicTrack) {
+        val names = PlaylistStore.load(this).keys.toList()
+        if (names.isEmpty()) {
+            askFolderName("Новая папка", "") { name -> createFolder(name, track) }
             return
         }
-        builder.show()
+        AlertDialog.Builder(this).setTitle("В папку")
+            .setItems((names + "Новая папка…").toTypedArray()) { _, which ->
+                if (which < names.size) saveToFolder(names[which], track)
+                else askFolderName("Новая папка", "") { name -> createFolder(name, track) }
+            }.show()
     }
 
-    private fun askNewPlaylist(track: MusicTrack) {
-        val input = EditText(this).apply { hint = "Название плейлиста" }
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Новый плейлист").setView(input)
-            .setPositiveButton("Создать") { _, _ ->
+    private fun askFolderName(title: String, initial: String, onName: (String) -> Unit) {
+        val input = EditText(this).apply { hint = "Название"; setText(initial) }
+        AlertDialog.Builder(this).setTitle(title).setView(input)
+            .setPositiveButton("Ок") { _, _ ->
                 val name = input.text.toString().trim()
-                if (name.isNotEmpty()) savePlaylist(name, track)
+                if (name.isNotEmpty()) onName(name)
             }
             .setNegativeButton("Отмена", null).show()
     }
 
-    private fun savePlaylist(name: String, track: MusicTrack) {
+    private fun createFolder(name: String, first: MusicTrack? = null) {
         val lists = PlaylistStore.load(this)
         val key = PlaylistStore.findName(lists, name) ?: name
-        val list = lists.getOrPut(key) { mutableListOf() }
-        if (list.none { it.id == track.id }) list.add(track)
+        val folder = lists.getOrPut(key) { mutableListOf() }
+        if (first != null && folder.none { it.id == first.id }) folder.add(first)
         PlaylistStore.save(this, lists)
-        Toast.makeText(this, "Добавлено в «$key»", Toast.LENGTH_SHORT).show()
+        MusicCatalog.scheduleExport(this)
+        Toast.makeText(this, if (first != null) "Добавлено в «$key»" else "Папка «$key» создана", Toast.LENGTH_SHORT).show()
+        rebuild()
     }
 
-    private fun showTags(track: MusicTrack) {
-        val tg = MusicTags.get(this, track)
-        val text = if (tg == null) "Ещё не размечена. Нажми «Разметить» вверху."
-        else "Жанр: ${MusicTags.genres[tg.genre]}\nНастроение: ${MusicTags.moods[tg.mood]}\nЭнергичность: ${tg.energy} из 5"
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("${track.artist} — ${track.title}").setMessage(text)
-            .setPositiveButton("Ок", null).show()
+    private fun saveToFolder(name: String, track: MusicTrack) {
+        val lists = PlaylistStore.load(this)
+        val folder = lists.getOrPut(name) { mutableListOf() }
+        if (folder.none { it.id == track.id }) folder.add(track)
+        PlaylistStore.save(this, lists)
+        MusicCatalog.scheduleExport(this)
+        Toast.makeText(this, "Добавлено в «$name»", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun removeFromCurrentFolder(track: MusicTrack) {
+        val name = drillFolder ?: return
+        val lists = PlaylistStore.load(this)
+        val folder = lists[name] ?: return
+        folder.removeAll { it.id == track.id || MusicTags.trackKey(it) == MusicTags.trackKey(track) }
+        PlaylistStore.save(this, lists)
+        MusicCatalog.scheduleExport(this)
+        drillTracks = drillTracks?.filter { it.id != track.id }
+        rebuild()
+    }
+
+    private fun showFolderMenu(anchor: View, name: String) {
+        val menu = PopupMenu(this, anchor)
+        menu.menu.add(0, 1, 0, "Переименовать")
+        menu.menu.add(0, 2, 1, "Удалить папку")
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> askFolderName("Переименовать", name) { renameFolder(name, it) }
+                2 -> AlertDialog.Builder(this).setTitle("Удалить «$name»?")
+                    .setMessage("Сами песни останутся на телефоне.")
+                    .setPositiveButton("Удалить") { _, _ -> deleteFolder(name) }
+                    .setNegativeButton("Отмена", null).show()
+            }
+            true
+        }
+        menu.show()
+    }
+
+    private fun renameFolder(old: String, new: String) {
+        val lists = PlaylistStore.load(this)
+        if (lists.keys.any { it.equals(new, true) && it != old }) {
+            Toast.makeText(this, "«$new» уже есть", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val renamed = LinkedHashMap<String, MutableList<MusicTrack>>()
+        for ((k, v) in lists) renamed[if (k == old) new else k] = v
+        PlaylistStore.save(this, renamed)
+        MusicCatalog.scheduleExport(this)
+        rebuild()
+    }
+
+    private fun deleteFolder(name: String) {
+        val lists = PlaylistStore.load(this)
+        lists.remove(name)
+        PlaylistStore.save(this, lists)
+        MusicCatalog.scheduleExport(this)
+        rebuild()
     }
 
     // ---------------------------------------------------------------- адаптер
@@ -376,6 +534,7 @@ class MusicActivity : AppCompatActivity() {
             val row = rows[position]
             holder.title.text = row.title
             holder.subtitle.text = row.subtitle
+            holder.itemView.alpha = if (row.track != null && MusicTags.likedOf(this@MusicActivity, row.track) < 0) 0.5f else 1f
             holder.itemView.setOnClickListener { row.onClick() }
             val track = row.track
             if (track != null) {
@@ -386,7 +545,9 @@ class MusicActivity : AppCompatActivity() {
             } else {
                 holder.cover.setImageResource(R.drawable.cover_placeholder)
                 holder.menu.visibility = View.GONE
-                holder.itemView.setOnLongClickListener(null)
+                val onLong = row.onLong
+                if (onLong != null) holder.itemView.setOnLongClickListener { onLong(holder.itemView); true }
+                else holder.itemView.setOnLongClickListener(null)
             }
         }
     }

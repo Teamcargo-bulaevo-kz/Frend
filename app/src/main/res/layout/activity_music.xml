@@ -33,6 +33,11 @@
         app:tabIndicatorColor="@color/music_accent" app:tabMode="scrollable"
         app:tabSelectedTextColor="@color/music_accent" app:tabTextColor="@color/music_text_dim" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/sortButton" style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginStart="8dp" android:text="Сортировка: по названию" />
+
     <TextView
         android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:paddingStart="16dp" android:paddingTop="6dp" android:paddingEnd="16dp"

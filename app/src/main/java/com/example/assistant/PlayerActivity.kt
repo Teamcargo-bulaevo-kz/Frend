@@ -34,6 +34,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var play: ImageButton
     private lateinit var shuffle: ImageButton
     private lateinit var repeat: ImageButton
+    private lateinit var likeButton: com.google.android.material.button.MaterialButton
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -61,6 +62,13 @@ class PlayerActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.prev).setOnClickListener { MusicService.instance?.skipPrevious() }
         shuffle.setOnClickListener { MusicService.instance?.toggleShuffle() }
         repeat.setOnClickListener { MusicService.instance?.cycleRepeat() }
+        likeButton = findViewById(R.id.likeButton)
+        likeButton.setOnClickListener { toggleLike() }
+        findViewById<android.view.View>(R.id.editButton).setOnClickListener {
+            PlayerState.track?.let {
+                startActivity(Intent(this, TrackEditActivity::class.java).putExtra(TrackEditActivity.EXTRA_TRACK_ID, it.id))
+            }
+        }
         findViewById<android.view.View>(R.id.queueButton).setOnClickListener { showQueue() }
         findViewById<android.view.View>(R.id.similarButton).setOnClickListener { playSimilar() }
         findViewById<android.view.View>(R.id.sleepButton).setOnClickListener { showSleepTimer() }
@@ -79,6 +87,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        shownTrackId = -1L // характеристики могли поменять в редакторе
         handler.post(ticker)
     }
 
@@ -99,8 +108,11 @@ class PlayerActivity : AppCompatActivity() {
             artist.text = track.artist.ifBlank { "Неизвестный исполнитель" }
             CoverLoader.load(lifecycleScope, this, track, cover, 800)
             val tg = MusicTags.get(this, track)
-            tags.text = tg?.let { "${MusicTags.moods[it.mood]} · ${MusicTags.genres[it.genre]} · энергия ${it.energy}/5" }.orEmpty()
+            tags.text = tg?.takeIf { MusicTags.isTagged(it) }?.let {
+                "${it.moods.joinToString(", ") { m -> MusicTags.moodShort[m] ?: m }} · ${it.genreText} · энергия ${it.energy}/5"
+            }.orEmpty()
         }
+        likeButton.text = if (MusicTags.likedOf(this, track) > 0) "♥ Нравится" else "♡ Нравится"
         play.setImageResource(if (PlayerState.playing) R.drawable.ic_pause else R.drawable.ic_play)
         shuffle.alpha = if (PlayerState.shuffle) 1f else 0.4f
         repeat.alpha = if (PlayerState.repeat == PlayerState.REPEAT_OFF) 0.4f else 1f
@@ -116,6 +128,12 @@ class PlayerActivity : AppCompatActivity() {
             timeNow.text = PlayerState.formatTime(PlayerState.position())
         }
         timeTotal.text = PlayerState.formatTime(duration)
+    }
+
+    private fun toggleLike() {
+        val track = PlayerState.track ?: return
+        MusicTags.setLiked(this, track, if (MusicTags.likedOf(this, track) > 0) 0 else 1)
+        likeButton.text = if (MusicTags.likedOf(this, track) > 0) "♥ Нравится" else "♡ Нравится"
     }
 
     private fun showQueue() {
@@ -134,7 +152,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun playSimilar() {
         val track = PlayerState.track ?: return
         val tg = MusicTags.get(this, track)
-        if (tg == null) {
+        if (tg == null || !MusicTags.isTagged(tg)) {
             Toast.makeText(this, "Эта песня ещё не размечена. Разметь музыку в приложении «Музыка».", Toast.LENGTH_LONG).show()
             return
         }

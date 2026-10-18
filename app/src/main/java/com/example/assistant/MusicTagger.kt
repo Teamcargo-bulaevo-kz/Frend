@@ -265,7 +265,7 @@ object MusicTagger {
 
     /** «Please try again in 1m12.5s», «in 6.3s», «in 250ms» → миллисекунды. */
     fun retryDelayMs(message: String): Long? {
-        val m = Regex("try again in ((?:\\d+h)?(?:\\d+m)?(?:\\d+(?:\\.\\d+)?s)?(?:\\d+(?:\\.\\d+)?ms)?)").find(message) ?: return null
+        val m = Regex("try again in ((?:\\d+h)?(?:\\d+m(?!s))?(?:\\d+(?:\\.\\d+)?s)?(?:\\d+(?:\\.\\d+)?ms)?)").find(message) ?: return null
         val text = m.groupValues[1]
         if (text.isEmpty()) return null
         var ms = 0.0

@@ -58,6 +58,17 @@
         android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp"
         android:gravity="center" android:orientation="horizontal">
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/likeButton" style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♡ Нравится" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/editButton" style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Характеристики" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center" android:orientation="horizontal">
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/queueButton" style="@style/Widget.MaterialComponents.Button.TextButton"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Очередь" />
         <com.google.android.material.button.MaterialButton

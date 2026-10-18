@@ -86,6 +86,12 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".TrackEditActivity"
+            android:exported="false"
+            android:label="Характеристики"
+            android:taskAffinity="com.example.assistant.music"
+            android:theme="@style/Theme.Music" />
+        <activity
             android:name=".PlayerActivity"
             android:exported="false"
             android:label="Музыка"
