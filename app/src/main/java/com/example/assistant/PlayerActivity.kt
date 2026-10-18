@@ -34,7 +34,8 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var play: ImageButton
     private lateinit var shuffle: ImageButton
     private lateinit var repeat: ImageButton
-    private lateinit var likeButton: com.google.android.material.button.MaterialButton
+    private lateinit var likeButton: TextView
+    private lateinit var dislikeButton: TextView
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -63,15 +64,10 @@ class PlayerActivity : AppCompatActivity() {
         shuffle.setOnClickListener { MusicService.instance?.toggleShuffle() }
         repeat.setOnClickListener { MusicService.instance?.cycleRepeat() }
         likeButton = findViewById(R.id.likeButton)
-        likeButton.setOnClickListener { toggleLike() }
-        findViewById<android.view.View>(R.id.editButton).setOnClickListener {
-            PlayerState.track?.let {
-                startActivity(Intent(this, TrackEditActivity::class.java).putExtra(TrackEditActivity.EXTRA_TRACK_ID, it.id))
-            }
-        }
-        findViewById<android.view.View>(R.id.queueButton).setOnClickListener { showQueue() }
-        findViewById<android.view.View>(R.id.similarButton).setOnClickListener { playSimilar() }
-        findViewById<android.view.View>(R.id.sleepButton).setOnClickListener { showSleepTimer() }
+        dislikeButton = findViewById(R.id.dislikeButton)
+        likeButton.setOnClickListener { rate(1) }
+        dislikeButton.setOnClickListener { rate(-1) }
+        findViewById<TextView>(R.id.moreButton).setOnClickListener { showMore(it) }
 
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -112,7 +108,7 @@ class PlayerActivity : AppCompatActivity() {
                 "${it.moods.joinToString(", ") { m -> MusicTags.moodShort[m] ?: m }} · ${it.genreText} · энергия ${it.energy}/5"
             }.orEmpty()
         }
-        likeButton.text = if (MusicTags.likedOf(this, track) > 0) "♥ Нравится" else "♡ Нравится"
+        showRating(MusicTags.likedOf(this, track))
         play.setImageResource(if (PlayerState.playing) R.drawable.ic_pause else R.drawable.ic_play)
         shuffle.alpha = if (PlayerState.shuffle) 1f else 0.4f
         repeat.alpha = if (PlayerState.repeat == PlayerState.REPEAT_OFF) 0.4f else 1f
@@ -130,10 +126,40 @@ class PlayerActivity : AppCompatActivity() {
         timeTotal.text = PlayerState.formatTime(duration)
     }
 
-    private fun toggleLike() {
+    /** Нажатие на ♥ или 👎: повторное нажатие снимает оценку. */
+    private fun rate(value: Int) {
         val track = PlayerState.track ?: return
-        MusicTags.setLiked(this, track, if (MusicTags.likedOf(this, track) > 0) 0 else 1)
-        likeButton.text = if (MusicTags.likedOf(this, track) > 0) "♥ Нравится" else "♡ Нравится"
+        val now = MusicTags.likedOf(this, track)
+        val new = if (now == value) 0 else value
+        MusicTags.setLiked(this, track, new)
+        showRating(new)
+    }
+
+    private fun showRating(liked: Int) {
+        likeButton.text = if (liked > 0) "♥" else "♡"
+        likeButton.setTextColor(getColor(if (liked > 0) R.color.music_accent else R.color.music_text))
+        dislikeButton.alpha = if (liked < 0) 1f else 0.45f
+    }
+
+    /** Всё остальное спрятано в меню ⋮, чтобы внизу не было лишних кнопок. */
+    private fun showMore(anchor: android.view.View) {
+        val menu = android.widget.PopupMenu(this, anchor)
+        menu.menu.add(0, 1, 0, "Характеристики")
+        menu.menu.add(0, 2, 1, "Очередь")
+        menu.menu.add(0, 3, 2, "Ещё такое")
+        menu.menu.add(0, 4, 3, "Таймер сна")
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> PlayerState.track?.let {
+                    startActivity(Intent(this, TrackEditActivity::class.java).putExtra(TrackEditActivity.EXTRA_TRACK_ID, it.id))
+                }
+                2 -> showQueue()
+                3 -> playSimilar()
+                4 -> showSleepTimer()
+            }
+            true
+        }
+        menu.show()
     }
 
     private fun showQueue() {

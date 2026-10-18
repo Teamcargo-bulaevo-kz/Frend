@@ -175,12 +175,40 @@ object MusicCatalog {
         return n
     }
 
+    /** Таблица из текста: CSV (разделитель «;» или «,»), таблица markdown с «|», блоки ``` убираются. */
+    fun parseTextTable(raw: String): List<List<String>> {
+        val lines = raw.replace("\uFEFF", "").lines().filter { !it.trim().startsWith("```") }.filter { it.isNotBlank() }
+        if (lines.isEmpty()) return emptyList()
+        val first = lines.first()
+        if (first.count { it == '|' } >= 2 && first.count { it == '|' } > first.count { it == ';' }) {
+            // markdown-таблица: строки вида | а | б |, разделитель |---|---| пропускаем
+            return lines.filter { !Regex("^[\\s|:\\-]+$").matches(it) }.map { line ->
+                line.trim().trim('|').split('|').map { it.trim() }
+            }
+        }
+        return FileConvert.parseCsv(lines.joinToString("\n"), if (first.count { it == ';' } >= first.count { it == ',' }) ';' else ',')
+    }
+
+    /** Строки таблицы из файла: xlsx, csv или txt. */
+    fun readAnyTable(file: File): List<List<String>> = when (file.extension.lowercase()) {
+        "xlsx" -> try { FileConvert.xlsxRows(file) } catch (e: Exception) { emptyList() }
+        else -> try { parseTextTable(file.readText(Charsets.UTF_8)) } catch (e: Exception) { emptyList() }
+    }
+
+    /** Вставка ответа другого ИИ: разбирает текст и применяет разметку. Возвращает число обновлённых песен. */
+    fun importText(context: Context, text: String): Int {
+        val parsed = parseRows(parseTextTable(text), MusicTags.all(context))
+        if (parsed.updates.isNotEmpty()) MusicTags.putAll(context, parsed.updates)
+        if (parsed.folders.isNotEmpty()) restoreFolders(context, parsed.folders)
+        return parsed.updates.size
+    }
+
     /** Результат разбора таблицы: изменённые теги по ключам песен и папки по ключам песен. */
     class Parsed(val updates: Map<String, TrackTags>, val folders: List<Pair<String, List<String>>>)
 
     /** Читает таблицу в нашем или твоём формате songs_by_mood.xlsx. Возвращает число песен, у которых теги обновились. */
     fun importFrom(context: Context, file: File): Int {
-        val rows = try { FileConvert.xlsxRows(file) } catch (e: Exception) { return 0 }
+        val rows = readAnyTable(file)
         val parsed = parseRows(rows, MusicTags.all(context))
         if (parsed.updates.isNotEmpty()) MusicTags.putAll(context, parsed.updates, export = false)
         if (parsed.folders.isNotEmpty()) restoreFolders(context, parsed.folders)

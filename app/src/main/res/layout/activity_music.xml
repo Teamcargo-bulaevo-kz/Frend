@@ -12,12 +12,14 @@
             android:id="@+id/screenTitle" android:layout_width="0dp" android:layout_height="wrap_content"
             android:layout_weight="1" android:text="Музыка" android:textColor="@color/music_text"
             android:textSize="26sp" android:textStyle="bold" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/shuffleAll" style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Вперемешку" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/tagButton" style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Разметить" />
+        <TextView
+            android:id="@+id/shuffleAll" android:layout_width="48dp" android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Вперемешку"
+            android:gravity="center" android:text="🔀" android:textSize="22sp" />
+        <TextView
+            android:id="@+id/moreButton" android:layout_width="48dp" android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Ещё"
+            android:gravity="center" android:text="⋮" android:textColor="@color/music_text" android:textSize="26sp" />
     </LinearLayout>
 
     <EditText
@@ -32,11 +34,6 @@
         android:layout_marginTop="4dp" android:background="@color/music_bg"
         app:tabIndicatorColor="@color/music_accent" app:tabMode="scrollable"
         app:tabSelectedTextColor="@color/music_accent" app:tabTextColor="@color/music_text_dim" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/sortButton" style="@style/Widget.MaterialComponents.Button.TextButton"
-        android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:layout_marginStart="8dp" android:text="Сортировка: по названию" />
 
     <TextView
         android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"

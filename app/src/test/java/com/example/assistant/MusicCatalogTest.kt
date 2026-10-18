@@ -100,4 +100,42 @@ class MusicCatalogTest {
         val back = MusicCatalog.parseRows(listOf(MusicCatalog.header, row), emptyMap()).updates[key("A", "B")]!!
         assertEquals("", back.note)
     }
+
+    @Test fun readsCsvAnswerFromAnotherAi() {
+        val text = "```csv\n" +
+            "Исполнитель;Название;Жанр;Настроение;Энергичность (1-5);Ритм / темп;Краткое описание;Уверенность\n" +
+            "\"Баста\";\"Сансара\";\"Русский рэп\";\"Грустно, Романтично\";\"3\";\"средний (90–110 BPM)\";\"Лирика о любви\";\"Высокая\"\n" +
+            "\"\";\"Flight Electro Souls [muzmo.ru]\";\"Электроника\";\"Энергично\";\"5\";\"быстрый (120–140 BPM)\";\"Драйв\";\"Низкая\"\n" +
+            "```"
+        val parsed = MusicCatalog.parseRows(MusicCatalog.parseTextTable(text), emptyMap())
+        assertEquals(2, parsed.updates.size)
+        val basta = parsed.updates[key("Баста", "Сансара")]!!
+        assertEquals(setOf("sad", "romantic"), basta.moods)
+        assertEquals("hiphop", basta.genre)
+        assertEquals(3, basta.energy)
+        val noArtist = parsed.updates[key("", "Flight Electro Souls [muzmo.ru]")]!!
+        assertEquals("electronic", noArtist.genre)
+        assertTrue(noArtist.needsReview)
+    }
+
+    @Test fun readsMarkdownTableAnswer() {
+        val text = "| Исполнитель | Название | Жанр | Настроение | Энергичность (1-5) | Уверенность |\n" +
+            "|---|---|---|---|---|---|\n" +
+            "| Akon | Smack That | R&B | Весело | 4 | Высокая |"
+        val rows = MusicCatalog.parseTextTable(text)
+        assertEquals(2, rows.size)
+        val parsed = MusicCatalog.parseRows(rows, emptyMap())
+        assertEquals("rnb", parsed.updates[key("Akon", "Smack That")]!!.genre)
+    }
+
+    @Test fun aiPackInstructionAndPart() {
+        val text = MusicAiPack.partText(
+            listOf(MusicTrack(1, "Милая (Sefon.Pro)", "10AGE", "песни"), MusicTrack(2, "Sofia", "Alvaro Soler", "Eterno Agosto")), 1, 9
+        )
+        assertTrue(text.startsWith("ЧАСТЬ 1 ИЗ 9"))
+        assertTrue(text.contains("10AGE | Милая (Sefon.Pro)\n"))      // название без изменений, мусорный альбом скрыт
+        assertTrue(text.contains("Alvaro Soler | Sofia  (альбом: Eterno Agosto)"))
+        assertTrue(text.contains("ровно 2"))
+        assertTrue(text.contains("Агрессивно/Мрачно"))
+    }
 }

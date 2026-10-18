@@ -20,15 +20,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Сам размечает музыку: жанр, настроения, энергичность, темп, описание.
  * 1) читает таблицу Музыка.xlsx, если она уже есть (после переустановки);
- * 2) просит модель оценить неразмеченные песни пачками;
- * 3) песни, в которых модель не уверена, уточняет поиском в интернете небольшими группами.
+ * 2) просит модель оценить неразмеченные песни пачками (поиск в интернете не используется, чтобы не тратить лимит);
+ * песни, которые модель не смогла определить, можно отдать другому ИИ: см. MusicAiPack.
  * Идёт в фоне (служба с уведомлением), делает паузы при лимитах и в конце присылает уведомление.
  */
 object MusicTagger {
 
     private const val BATCH = 40
-    private const val WEB_BATCH = 4
-    private const val WEB_BELOW = 50
     const val PROGRESS_CHANNEL = "music_tagging"
     const val DONE_CHANNEL = "music_tagging_done"
     const val PROGRESS_NOTIFICATION_ID = 2003
@@ -70,11 +68,10 @@ object MusicTagger {
         if (music.isEmpty()) return "Не вижу музыку на телефоне. Разреши доступ к аудио."
         if (redo) MusicTags.clear(app)
         prefs(app).edit().remove(KEY_BLOCKED_UNTIL).apply()
-        val (untagged, weak) = workCounts(app, music)
-        if (untagged == 0 && weak == 0) return "Вся музыка уже размечена (${music.size} треков)."
+        val untagged = untaggedCount(app, music)
+        if (untagged == 0) return "Новых песен для разметки нет (${music.size} треков). Неопознанные можно отдать другому ИИ: скажи «подготовь музыку для другого ИИ»."
         startRun(app)
-        return "Начал разметку: новых песен $untagged" + (if (weak > 0) ", ещё $weak уточню через интернет" else "") +
-            ". Идёт в фоне, можно пользоваться телефоном. Когда закончу, пришлю уведомление."
+        return "Начал разметку: новых песен $untagged. Идёт в фоне, можно пользоваться телефоном. Когда закончу, пришлю уведомление."
     }
 
     /**
@@ -92,8 +89,8 @@ object MusicTagger {
             if (now - p.getLong(KEY_LAST_AUTO, 0L) < 10 * 60_000L) return@launch
             val music = MusicLibrary.index(app).allMusic()
             if (music.isEmpty()) return@launch
-            val (untagged, weak) = workCounts(app, music)
-            if (untagged == 0 && weak == 0) {
+            val untagged = untaggedCount(app, music)
+            if (untagged == 0) {
                 // Таблица должна существовать и после полной разметки
                 if (!MusicCatalog.file().exists() && MusicTags.count(app) > 0) MusicCatalog.scheduleExport(app)
                 return@launch
@@ -118,20 +115,16 @@ object MusicTagger {
         }
     }
 
-    /** Сколько песен ещё без разметки и сколько размечено неуверенно и ждёт интернета. */
-    fun workCounts(context: Context, music: List<MusicTrack>): Pair<Int, Int> {
+    /** Сколько песен ещё без разметки (и которые ИИ ещё не пробовал определить). */
+    fun untaggedCount(context: Context, music: List<MusicTrack>): Int {
         val seen = HashSet<String>()
         var untagged = 0
-        var weak = 0
         for (t in music) {
-            val key = MusicTags.trackKey(t)
-            if (!seen.add(key)) continue
+            if (!seen.add(MusicTags.trackKey(t))) continue
             val tags = MusicTags.get(context, t)
-            if (!MusicTags.isTagged(tags)) {
-                if (tags?.aiTried == true) { if (!tags.webTried) weak++ } else untagged++
-            } else if (tags != null && !tags.edited && !tags.webTried && tags.confidence < WEB_BELOW) weak++
+            if (!MusicTags.isTagged(tags) && tags?.aiTried != true) untagged++
         }
-        return untagged to weak
+        return untagged
     }
 
     // ---------------------------------------------------------------- работа
@@ -157,7 +150,6 @@ object MusicTagger {
         val music = MusicLibrary.index(context, force = true).allMusic()
         try {
             phaseAi(context, client, music)
-            phaseWeb(context, client, music)
         } catch (e: Stop) {
             lastError = e.reason
         }
@@ -211,55 +203,6 @@ object MusicTagger {
             done += batch.size
             notifyProgress(context)
             delay(2_000)
-        }
-    }
-
-    private suspend fun phaseWeb(context: Context, client: GroqClient, music: List<MusicTrack>) {
-        val weak = music.distinctBy { MusicTags.trackKey(it) }.filter {
-            val tg = MusicTags.get(context, it)
-            tg != null && !tg.edited && !tg.webTried &&
-                ((MusicTags.isTagged(tg) && tg.confidence < WEB_BELOW) || (!MusicTags.isTagged(tg) && tg.aiTried))
-        }
-        if (weak.isEmpty()) return
-        phase = "Уточняю через интернет"
-        total = weak.size
-        done = 0
-        notifyProgress(context)
-        var failures = 0
-        for (group in weak.chunked(WEB_BATCH)) {
-            // Запрос принципиально не проходит (слишком большой, не принят): больше эту группу не мучаем
-            var markTried = false
-            val result = try {
-                withRetry { askWeb(client, group) }
-            } catch (e: Stop) {
-                // Лимит на сегодня: то, что уже размечено моделью, остаётся, остальное уточним позже
-                throw e
-            } catch (e: Exception) {
-                failures++
-                markTried = e is GroqApiException && e.code in setOf(400, 413, 422)
-                if (failures >= 3) throw Stop("поиск в интернете недоступен: ${e.message?.take(60)}")
-                null
-            }
-            val updates = HashMap<String, TrackTags>()
-            for ((i, track) in group.withIndex()) {
-                val key = MusicTags.trackKey(track)
-                val old = MusicTags.get(context, track) ?: continue
-                val found = result?.get(i + 1)
-                updates[key] = if (found != null && found.confidence >= old.confidence) {
-                    found.copy(
-                        artist = old.artist, title = old.title, album = old.album, liked = old.liked, note = old.note,
-                        webTried = true, source = TrackTags.SOURCE_WEB,
-                        genreLabel = found.genreLabel.ifBlank { old.genreLabel }
-                    )
-                } else {
-                    old.copy(webTried = true)
-                }
-            }
-            if (result != null) failures = 0
-            if (updates.isNotEmpty() && (result != null || markTried)) MusicTags.putAll(context, updates)
-            done += group.size
-            notifyProgress(context)
-            delay(4_000)
         }
     }
 
@@ -324,15 +267,6 @@ object MusicTagger {
         return MusicTags.parseResponse(text, TrackTags.SOURCE_AI).filterKeys { it in 1..batch.size }
     }
 
-    private suspend fun askWeb(client: GroqClient, group: List<MusicTrack>): Map<Int, TrackTags> {
-        val lines = group.mapIndexed { i, t -> "${i + 1}|${t.artist.ifBlank { "?" }}|${MusicTags.cleanTitle(t.title)}" }
-        val system = "Найди в интернете (Last.fm, Spotify, Genius, Яндекс Музыка, Shazam) жанр, настроение и темп каждой песни из списка " +
-            "в формате номер|исполнитель|название. " + formatSpec() + " Если песню не нашёл, поставь c ниже 30. " +
-            "Сначала поищи, потом ответь: после слова «ИТОГ:» только JSON-массив, без пояснений."
-        val text = client.webAsk(system, lines.joinToString("\n"), 4000)
-        return MusicTags.parseResponse(text, TrackTags.SOURCE_WEB).filterKeys { it in 1..group.size }
-    }
-
     /** Жанр, записанный в самом файле (ID3). Часто пустой, но когда есть, сильно помогает модели. */
     private fun embeddedGenre(context: Context, track: MusicTrack): String {
         val retriever = MediaMetadataRetriever()
@@ -392,8 +326,9 @@ object MusicTagger {
             if (error != null) append(" Причина: $error.")
         }
         if (error != null) {
-            // Ошибка или лимит: не пытаемся автоматически минут 40, чтобы не стучаться впустую
-            prefs(context).edit().putLong(KEY_BLOCKED_UNTIL, System.currentTimeMillis() + 40 * 60_000L).apply()
+            // Ошибка или лимит: автоматически не пробуем снова (при суточном лимите — несколько часов)
+            val pause = if (error.contains("сегодня")) 6 * 3_600_000L else 40 * 60_000L
+            prefs(context).edit().putLong(KEY_BLOCKED_UNTIL, System.currentTimeMillis() + pause).apply()
         }
         val n = Notification.Builder(context, DONE_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)

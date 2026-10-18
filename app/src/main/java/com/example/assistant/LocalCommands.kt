@@ -401,6 +401,12 @@ object LocalCommands {
         ) {
             return LocalCommand("music_tags", mapOf("action" to "analyze"))
         }
+        if (Regex("^(подготовь|сделай|выгрузи|дай)( мне)? (музык\\p{L}*|песни|список песен|файлы|файл)( для| под)? (другого|стороннего|внешнего|друг\\p{L}*) (ии|ай|ai|нейросети|нейронки)$").matches(t)) {
+            return LocalCommand("music_tags", mapOf("action" to "ai_pack"))
+        }
+        if (t in setOf("импортируй таблицу музыки", "импортируй таблицу", "импортируй разметку", "загрузи разметку", "подхвати таблицу музыки")) {
+            return LocalCommand("music_tags", mapOf("action" to "import"))
+        }
         if (t in setOf("как идет разметка музыки", "статус разметки", "сколько песен размечено", "как идет разметка", "статистика музыки")) {
             return LocalCommand("music_tags", mapOf("action" to "status"))
         }

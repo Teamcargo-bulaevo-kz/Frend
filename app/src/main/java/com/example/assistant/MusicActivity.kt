@@ -63,7 +63,6 @@ class MusicActivity : AppCompatActivity() {
     private lateinit var search: EditText
     private lateinit var status: TextView
     private lateinit var screenTitle: TextView
-    private lateinit var sortButton: MaterialButton
     private lateinit var mini: LinearLayout
     private lateinit var miniProgress: ProgressBar
     private lateinit var miniTitle: TextView
@@ -90,7 +89,6 @@ class MusicActivity : AppCompatActivity() {
         search = findViewById(R.id.search)
         status = findViewById(R.id.status)
         screenTitle = findViewById(R.id.screenTitle)
-        sortButton = findViewById(R.id.sortButton)
         mini = findViewById(R.id.miniPlayer)
         miniProgress = findViewById(R.id.miniProgress)
         miniTitle = findViewById(R.id.miniTitle)
@@ -98,8 +96,6 @@ class MusicActivity : AppCompatActivity() {
         miniPlay = findViewById(R.id.miniPlay)
 
         sort = Sort.values().firstOrNull { it.name == prefs().getString("sort", null) } ?: Sort.NAME
-        sortButton.text = "Сортировка: ${sort.label}"
-        sortButton.setOnClickListener { chooseSort() }
         status.setOnClickListener {
             if (!SharedFolder.hasAccess() && Build.VERSION.SDK_INT >= 30) {
                 startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
@@ -116,22 +112,8 @@ class MusicActivity : AppCompatActivity() {
         })
         search.doAfterTextChanged { rebuild() }
 
-        findViewById<MaterialButton>(R.id.shuffleAll).setOnClickListener {
-            val pool = allTracks.filter { MusicTags.likedOf(this, it) >= 0 }.ifEmpty { allTracks }
-            if (pool.isEmpty()) return@setOnClickListener
-            startQueue(pool.shuffled().take(500), 0)
-        }
-        findViewById<MaterialButton>(R.id.tagButton).setOnClickListener {
-            if (MusicTagger.running) {
-                Toast.makeText(this, MusicTagger.progressText(), Toast.LENGTH_LONG).show()
-            } else {
-                lifecycleScope.launch {
-                    val msg = withContext(Dispatchers.IO) { MusicTagger.start(this@MusicActivity) }
-                    Toast.makeText(this@MusicActivity, msg, Toast.LENGTH_LONG).show()
-                    rebuild()
-                }
-            }
-        }
+        findViewById<TextView>(R.id.shuffleAll).setOnClickListener { shuffleAll() }
+        findViewById<TextView>(R.id.moreButton).setOnClickListener { showMainMenu(it) }
         findViewById<View>(R.id.miniInfo).setOnClickListener { openPlayer() }
         mini.setOnClickListener { openPlayer() }
         miniPlay.setOnClickListener { MusicService.instance?.togglePlay() }
@@ -207,6 +189,62 @@ class MusicActivity : AppCompatActivity() {
         }
     }
 
+    // ---------------------------------------------------------------- главное меню
+
+    private fun shuffleAll() {
+        val pool = allTracks.filter { MusicTags.likedOf(this, it) >= 0 }.ifEmpty { allTracks }
+        if (pool.isEmpty()) return
+        startQueue(pool.shuffled().take(500), 0)
+    }
+
+    /** Меню ⋮ наверху: разметка, сортировка и работа с другими ИИ. */
+    private fun showMainMenu(anchor: View) {
+        val menu = PopupMenu(this, anchor)
+        menu.menu.add(0, 1, 0, "Сортировка: ${sort.label}")
+        menu.menu.add(0, 2, 1, "Разметить музыку")
+        menu.menu.add(0, 3, 2, "Подготовить для другого ИИ")
+        menu.menu.add(0, 4, 3, "Вставить ответ другого ИИ")
+        menu.menu.add(0, 5, 4, "Обновить таблицу Музыка.xlsx")
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> chooseSort()
+                2 -> runInBackground { MusicTagger.start(this) }
+                3 -> runInBackground { MusicAiPack.build(this) }
+                4 -> pasteAiAnswer()
+                5 -> runInBackground {
+                    if (MusicCatalog.exportNow(this)) "Таблица обновлена: Assistant/${MusicCatalog.FILE_NAME}"
+                    else "Нет доступа к папке Assistant. Разреши доступ ко всем файлам."
+                }
+            }
+            true
+        }
+        menu.show()
+    }
+
+    /** Выполняет блокирующее действие в фоне и показывает его результат. */
+    private fun runInBackground(action: () -> String) {
+        lifecycleScope.launch {
+            val msg = withContext(Dispatchers.IO) { try { action() } catch (e: Exception) { "Ошибка: ${e.message}" } }
+            AlertDialog.Builder(this@MusicActivity).setMessage(msg).setPositiveButton("Ок", null).show()
+            rebuild()
+        }
+    }
+
+    /** Берёт из буфера обмена ответ другого ИИ (CSV или таблицу) и применяет разметку. */
+    private fun pasteAiAnswer() {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+        if (text.isBlank()) {
+            Toast.makeText(this, "В буфере обмена пусто. Скопируй ответ другого ИИ и попробуй снова.", Toast.LENGTH_LONG).show()
+            return
+        }
+        runInBackground {
+            val n = MusicCatalog.importText(this, text)
+            if (n == 0) "Не нашёл в тексте таблицу. Нужны колонки Исполнитель, Название, Настроение. Скопируй ответ ИИ целиком."
+            else "Применил разметку: $n песен. Остальное можно отдать следующей части."
+        }
+    }
+
     // ---------------------------------------------------------------- сортировка
 
     private fun chooseSort() {
@@ -215,7 +253,6 @@ class MusicActivity : AppCompatActivity() {
             .setItems(all.map { it.label }.toTypedArray()) { _, which ->
                 sort = all[which]
                 prefs().edit().putString("sort", sort.name).apply()
-                sortButton.text = "Сортировка: ${sort.label}"
                 rebuild()
             }.show()
     }
@@ -252,7 +289,6 @@ class MusicActivity : AppCompatActivity() {
 
         val drill = drillTracks
         screenTitle.text = drillTitle ?: "Музыка"
-        sortButton.visibility = if (drill != null || query.isNotEmpty() || tab == 0) View.VISIBLE else View.GONE
         rows = when {
             drill != null -> trackRows(applyQuery(sortTracks(drill), query))
             query.isNotEmpty() -> trackRows(applyQuery(sortTracks(allTracks), query))

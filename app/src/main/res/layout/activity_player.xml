@@ -57,25 +57,18 @@
     <LinearLayout
         android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp"
         android:gravity="center" android:orientation="horizontal">
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/likeButton" style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♡ Нравится" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/editButton" style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Характеристики" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center" android:orientation="horizontal">
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/queueButton" style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Очередь" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/similarButton" style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ещё такое" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/sleepButton" style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Таймер сна" />
+        <TextView
+            android:id="@+id/dislikeButton" android:layout_width="64dp" android:layout_height="56dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Не нравится"
+            android:gravity="center" android:text="👎" android:textSize="26sp" />
+        <TextView
+            android:id="@+id/likeButton" android:layout_width="64dp" android:layout_height="56dp"
+            android:layout_marginStart="24dp" android:layout_marginEnd="24dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Нравится"
+            android:gravity="center" android:text="♡" android:textColor="@color/music_text" android:textSize="32sp" />
+        <TextView
+            android:id="@+id/moreButton" android:layout_width="64dp" android:layout_height="56dp"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Ещё"
+            android:gravity="center" android:text="⋮" android:textColor="@color/music_text" android:textSize="28sp" />
     </LinearLayout>
 </LinearLayout>

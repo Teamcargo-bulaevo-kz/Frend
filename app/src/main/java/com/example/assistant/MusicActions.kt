@@ -148,28 +148,31 @@ object MusicActions {
             "status" -> MusicTags.summary(context, music) + if (MusicTagger.running) "\n" + MusicTagger.progressText() else ""
             "export" -> exportList(context)
             "import" -> importTable(context, file)
+            "ai_pack" -> MusicAiPack.build(context)
             else -> "Неизвестное действие: $action"
         }
     }
 
-    /** Подхватывает готовую таблицу (например, songs_by_mood.xlsx) из Входящих или из папки Assistant. */
+    /** Подхватывает готовые таблицы с разметкой (xlsx, csv, txt) из Входящих; можно назвать файл. */
     private fun importTable(context: Context, file: String?): String {
         if (!SharedFolder.ensure()) return "Нет доступа к общей папке Assistant. Разреши доступ ко всем файлам в настройках."
-        val dirs = listOf(SharedFolder.inbox(), SharedFolder.root())
-        val all = dirs.flatMap { d -> d.listFiles { f -> f.isFile && f.extension.lowercase() == "xlsx" }.orEmpty().toList() }
+        val ext = setOf("xlsx", "csv", "txt")
+        val inbox = SharedFolder.inbox().listFiles { f -> f.isFile && f.extension.lowercase() in ext }.orEmpty().toList()
         val wanted = file?.trim().orEmpty()
-        val source = (if (wanted.isNotEmpty()) {
-            all.firstOrNull { it.name.equals(wanted, true) || it.nameWithoutExtension.equals(wanted, true) }
-        } else {
-            all.filter { f ->
-                val n = f.name.lowercase()
-                n == MusicCatalog.FILE_NAME.lowercase() || "song" in n || "музык" in n || "mood" in n
-            }.maxByOrNull { it.lastModified() }
-        }) ?: return "Не нашёл таблицу. Положи xlsx во Входящие и скажи её имя."
-        val n = MusicCatalog.importFrom(context, source)
-        if (n == 0) return "В «${source.name}» не нашёл разметки (нужны колонки Исполнитель, Название, Настроение)."
+        val sources = if (wanted.isNotEmpty()) {
+            val all = inbox + SharedFolder.root().listFiles { f -> f.isFile && f.extension.lowercase() in ext }.orEmpty().toList()
+            listOfNotNull(all.firstOrNull { it.name.equals(wanted, true) || it.nameWithoutExtension.equals(wanted, true) })
+        } else inbox
+        if (sources.isEmpty()) return "Не нашёл таблицу. Положи xlsx или csv во Входящие и скажи «импортируй таблицу музыки»."
+        var total = 0
+        val used = ArrayList<String>()
+        for (f in sources) {
+            val n = MusicCatalog.importFrom(context, f)
+            if (n > 0) { total += n; used.add(f.name) }
+        }
+        if (total == 0) return "Не нашёл в файлах новой разметки (нужны колонки Исполнитель, Название, Настроение)."
         MusicCatalog.scheduleExport(context)
-        return "Подхватил разметку из «${source.name}»: $n песен. " + MusicTagger.start(context)
+        return "Подхватил разметку: $total песен из ${used.joinToString(", ") { "«$it»" }}. " + MusicTagger.start(context)
     }
 
     private fun exportList(context: Context): String {
