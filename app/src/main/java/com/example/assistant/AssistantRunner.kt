@@ -22,7 +22,7 @@ object AssistantRunner {
             val answer = try {
                 AssistantRepository(app, BuildConfig.GROQ_API_KEY).handle(text)
             } catch (e: Exception) {
-                "Ошибка: ${e.message}"
+                FriendlyError.text(e)
             }
             ChatHistory.append(app, "assistant", answer, chatId)
             // Голосовая команда вне экрана чата: отвечаем голосом

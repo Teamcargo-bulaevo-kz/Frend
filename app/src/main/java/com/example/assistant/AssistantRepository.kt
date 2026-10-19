@@ -106,9 +106,18 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         }
 
         return try {
-            askModel(prompt, normalized).also { summarizeInBackground() }
+            val answer = try {
+                askModel(prompt, normalized)
+            } catch (e: GroqApiException) {
+                // Короткий лимит «в минуту»: подождём и повторим один раз сами
+                val wait = if (e.code == 429) MusicTagger.retryDelayMs(e.message.orEmpty()) else null
+                if (wait == null || wait > 20_000L) throw e
+                kotlinx.coroutines.delay(wait + 500)
+                askModel(prompt, normalized)
+            }
+            answer.also { summarizeInBackground() }
         } catch (e: Exception) {
-            "Ошибка: ${e.message}"
+            FriendlyError.text(e)
         }
     }
 

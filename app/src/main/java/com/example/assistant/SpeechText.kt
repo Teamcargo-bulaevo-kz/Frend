@@ -24,4 +24,28 @@ object SpeechText {
         val end = cut.lastIndexOfAny(charArrayOf('.', '!', '?'))
         return if (end > MAX_SPOKEN / 3) cut.substring(0, end + 1) else cut
     }
+
+    /**
+     * Короткий пересказ для озвучки: первые одно-два предложения, остальное «на экране».
+     * Короткие ответы (до ~260 символов) читаются целиком.
+     */
+    fun brief(text: String): String {
+        val hadCode = text.contains("```")
+        val flat = clean(text)
+        if (flat.length <= BRIEF_LIMIT) return flat
+        val sentences = Regex("(?<=[.!?…])\\s+").split(flat).filter { it.isNotBlank() }
+        val sb = StringBuilder()
+        var count = 0
+        for (sent in sentences) {
+            if (count >= 2 || (sb.isNotEmpty() && sb.length + sent.length > BRIEF_LIMIT)) break
+            if (sb.isNotEmpty()) sb.append(' ')
+            sb.append(sent)
+            count++
+        }
+        var out = sb.toString().ifBlank { flat.take(BRIEF_LIMIT) }
+        if (out.length > BRIEF_LIMIT + 60) out = out.take(BRIEF_LIMIT).trimEnd() + "…"
+        return if (hadCode && !out.contains("Код показан")) "$out Код показан на экране." else "$out Подробности на экране."
+    }
+
+    private const val BRIEF_LIMIT = 260
 }

@@ -281,7 +281,9 @@ class MainActivity : AppCompatActivity() {
                 val rates = floatArrayOf(0.8f, 0.95f, 1.1f, 1.3f)
                 val rateNames = arrayOf("Медленно", "Спокойно", "Быстрее", "Быстро")
                 var rateIndex = rates.indexOfFirst { kotlin.math.abs(it - Speaker.rate(this)) < 0.03f }.let { if (it < 0) 1 else it }
-                val labels = (listOf("Скорость: ${rateNames[rateIndex]} (нажми, чтобы сменить)") + voices.map { it.label } +
+                var brief = Speaker.brief(this)
+                fun briefLabel() = if (brief) "Длинные ответы: пересказывать кратко (нажми, чтобы сменить)" else "Длинные ответы: читать полностью (нажми, чтобы сменить)"
+                val labels = (listOf("Скорость: ${rateNames[rateIndex]} (нажми, чтобы сменить)", briefLabel()) + voices.map { it.label } +
                     listOf("Проверить голос")).toTypedArray()
                 AlertDialog.Builder(this)
                     .setTitle("Голос озвучки")
@@ -293,9 +295,14 @@ class MainActivity : AppCompatActivity() {
                                 Toast.makeText(this, "Скорость: ${rateNames[rateIndex]}", Toast.LENGTH_SHORT).show()
                                 Speaker.sample(applicationContext)
                             }
+                            which == 1 -> {
+                                brief = !brief
+                                Speaker.setBrief(applicationContext, brief)
+                                Toast.makeText(this, if (brief) "Длинные ответы пересказываю кратко" else "Длинные ответы читаю полностью", Toast.LENGTH_SHORT).show()
+                            }
                             which == labels.size - 1 -> Speaker.sample(applicationContext)
                             else -> {
-                                Speaker.setVoice(applicationContext, voices[which - 1].name)
+                                Speaker.setVoice(applicationContext, voices[which - 2].name)
                                 Speaker.sample(applicationContext)
                             }
                         }
@@ -326,7 +333,7 @@ class MainActivity : AppCompatActivity() {
             val answer = try {
                 repository.handle(prompt)
             } catch (e: Exception) {
-                "Что-то пошло не так: ${e.message ?: "неизвестная ошибка"}. Попробуй ещё раз."
+                FriendlyError.text(e)
             }
             ChatHistory.append(applicationContext, "assistant", answer, chatId)
             if (Speaker.enabled(applicationContext)) Speaker.speak(applicationContext, answer)

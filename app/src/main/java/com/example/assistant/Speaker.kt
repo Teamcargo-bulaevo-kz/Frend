@@ -15,6 +15,7 @@ object Speaker {
     private const val KEY = "speak_replies"
     private const val KEY_RATE = "tts_rate"
     private const val KEY_VOICE = "tts_voice"
+    private const val KEY_BRIEF = "tts_brief"
 
     private var tts: TextToSpeech? = null
     @Volatile private var ready = false
@@ -104,14 +105,25 @@ object Speaker {
         }
     }
 
+    /** true — длинные ответы пересказываются кратко (по умолчанию), false — читаются полностью. */
+    fun brief(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_BRIEF, true)
+
+    fun setBrief(context: Context, value: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_BRIEF, value).apply()
+    }
+
     fun speak(context: Context, text: String) {
-        val spoken = clean(text)
+        val spoken = if (brief(context)) SpeechText.brief(text) else clean(text)
         if (spoken.isEmpty()) return
         ensure(context) { it.speak(spoken, TextToSpeech.QUEUE_FLUSH, Bundle(), "assistant") }
     }
 
     /** Короткая проверка голоса в настройках. */
-    fun sample(context: Context) = speak(context, "Здравствуйте! Так звучит мой голос.")
+    fun sample(context: Context) {
+        val spoken = "Здравствуйте! Так звучит мой голос."
+        ensure(context) { it.speak(spoken, TextToSpeech.QUEUE_FLUSH, Bundle(), "assistant") }
+    }
 
     @Synchronized
     fun stop() {

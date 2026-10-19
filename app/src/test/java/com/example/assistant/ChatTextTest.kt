@@ -44,3 +44,30 @@ class ChatTextTest {
         assertTrue(t.endsWith("."))
     }
 }
+
+class BriefAndErrorTest {
+    @Test fun shortAnswerIsReadFully() {
+        assertEquals("Фонарик включён.", SpeechText.brief("Фонарик включён."))
+    }
+
+    @Test fun longAnswerIsShortened() {
+        val long = (1..30).joinToString(" ") { "Это длинное предложение номер $it." }
+        val t = SpeechText.brief(long)
+        assertTrue(t, t.length < 400)
+        assertTrue(t, t.endsWith("Подробности на экране."))
+        assertTrue(t, t.contains("номер 1."))
+    }
+
+    @Test fun codeAnswerSaysCodeOnScreen() {
+        val t = SpeechText.brief("Вот пример страницы приветствия на HTML, которая показывает надпись Hello World по центру экрана и использует простую разметку без скриптов и стилей, чтобы было проще начать.\n```html\n<h1>Hello</h1>\n```\nСохрани файл как index.html и открой в браузере, всё заработает сразу.")
+        assertTrue(t, t.contains("Код показан на экране"))
+        assertTrue(t, !t.contains("<h1>"))
+    }
+
+    @Test fun rateLimitIsFriendly() {
+        val msg = "Groq API error 429: {\"error\":{\"message\":\"Rate limit reached ... tokens per minute (TPM): Limit 8000. Please try again in 12.3825s.\"}}"
+        val t = FriendlyError.fromMessage(msg)
+        assertTrue(t, t.contains("в минуту") && t.contains("13"))
+        assertTrue(FriendlyError.fromMessage("Groq API error 429: tokens per day (TPD) limit").contains("Дневной"))
+    }
+}
