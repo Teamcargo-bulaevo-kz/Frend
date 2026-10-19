@@ -30,6 +30,9 @@
 
     <!-- Яркость и автоповорот: выдаётся вручную («Изменение системных настроек») -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <!-- Напоминания в точное время и слово «Джарвис» -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />

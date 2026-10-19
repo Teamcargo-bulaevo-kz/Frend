@@ -53,21 +53,41 @@ class AssistantAccessibilityService : AccessibilityService() {
             return "Не нашёл в шторке плитку «$name». На этом телефоне она может называться иначе или быть на втором экране шторки."
         }
 
-        val before = tileState(tile)
+        val key = QuickSettings.resolve(name)
+        // Настоящее состояние из системы надёжнее подписи на плитке
+        val before = SystemState.isOn(this, key) ?: tileState(tile)
         if (want != null && before == want) {
             closeShade()
             return "«$name» уже ${if (want) "включено" else "выключено"}"
         }
-        if (!clickNode(tile)) {
-            closeShade()
-            return "Не получилось нажать плитку «$name»."
+
+        // Нажимаем и проверяем результат; если не сработало, нажимаем ещё раз (максимум 2 раза)
+        var current: Boolean? = before
+        var clicked = false
+        for (round in 0 until 2) {
+            val node = if (round == 0) tile else findTile(labels)
+            if (node == null || !clickNode(node)) {
+                if (!clicked) {
+                    closeShade()
+                    return "Не получилось нажать плитку «$name»."
+                }
+                break
+            }
+            clicked = true
+            // Ждём, пока система переключится (Wi-Fi и Bluetooth включаются не мгновенно)
+            for (wait in 0 until 6) {
+                delay(500)
+                current = SystemState.isOn(this, key) ?: findTile(labels)?.let { tileState(it) }
+                if (want == null || current == want) break
+            }
+            if (want == null || current == want || current == null) break
         }
-        delay(700)
-        val after = findTile(labels)?.let { tileState(it) }
         closeShade()
         return when {
-            after != null -> "«$name» теперь ${if (after) "включено" else "выключено"}"
-            want != null -> "Нажал «$name» (${if (want) "включить" else "выключить"}). Проверь состояние: телефон не показал его."
+            want != null && current == want -> "«$name» теперь ${if (want) "включено" else "выключено"}"
+            want != null && current != null -> "Не получилось ${if (want) "включить" else "выключить"} «$name»: телефон не переключился. Попробуй вручную в шторке."
+            current != null -> "«$name» теперь ${if (current) "включено" else "выключено"}"
+            want != null -> "Нажал «$name» (${if (want) "включить" else "выключить"}). Телефон не показал состояние, проверь на экране."
             else -> "Нажал «$name»"
         }
     }

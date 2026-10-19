@@ -9,5 +9,5 @@
     android:paddingTop="14dp"
     android:paddingEnd="16dp"
     android:paddingBottom="14dp"
-    android:textColor="#1B1B1F"
+    android:textColor="@color/chat_text"
     android:textSize="15sp" />

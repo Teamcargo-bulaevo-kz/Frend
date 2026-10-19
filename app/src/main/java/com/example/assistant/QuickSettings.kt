@@ -40,15 +40,21 @@ object QuickSettings {
         return list.map { TextMatch.normalize(it) }.filter { it.isNotEmpty() }
     }
 
-    /** По подписи плитки понять, включена ли она: true, false или null, если непонятно. */
+    /**
+     * По подписи плитки понять, включена ли она: true, false или null, если непонятно.
+     * Понимает полные слова и сокращения («Выкл.», «Вкл.»), русские и английские подписи.
+     * Если в подписи есть и то и другое, решает то, что встретилось раньше.
+     */
     fun stateFrom(text: String): Boolean? {
-        val n = " " + TextMatch.normalize(text) + " "
-        val off = listOf("выключ", "отключ", " off ", "неактив", "не активн", " отключено ")
-        val on = listOf("включ", " on ", "активн")
-        return when {
-            off.any { n.contains(it) } -> false
-            on.any { n.contains(it) } -> true
-            else -> null
+        val words = TextMatch.normalize(text).split(' ').filter { it.isNotEmpty() }
+        fun isOff(w: String) = w == "off" || w == "disabled" || w == "inactive" || w.startsWith("выкл") ||
+            w.startsWith("отключен") || w.startsWith("неактив")
+        fun isOn(w: String) = w == "on" || w == "enabled" || w == "active" || w == "вкл" ||
+            (w.startsWith("включен")) || w.startsWith("активн")
+        for (w in words) {
+            if (isOff(w)) return false
+            if (isOn(w)) return true
         }
+        return null
     }
 }

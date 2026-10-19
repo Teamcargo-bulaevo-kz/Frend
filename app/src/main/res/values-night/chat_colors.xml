@@ -1,0 +1,17 @@
+<resources>
+    <color name="chat_bg">#101118</color>
+    <color name="chat_surface">#1B1D28</color>
+    <color name="chat_stroke">#2B2E3F</color>
+    <color name="chat_accent">#7C7CFF</color>
+    <color name="chat_on_bubble_user">#FFFFFF</color>
+    <color name="chat_on_accent">#101118</color>
+    <color name="chat_bubble_user">#5F5FF0</color>
+    <color name="chat_bubble_assistant">#222536</color>
+    <color name="chat_text">#ECEDF6</color>
+    <color name="chat_text_dim">#9A9DB4</color>
+    <color name="chat_icon">#C8CAE0</color>
+    <color name="chat_selected">#2A2D4A</color>
+    <color name="chat_code_bg">#0B0C12</color>
+    <color name="chat_code_text">#E6E8F5</color>
+    <color name="chat_code_head">#1A1C2A</color>
+</resources>

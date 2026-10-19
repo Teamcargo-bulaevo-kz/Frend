@@ -53,11 +53,8 @@ class VoiceActivity : ComponentActivity() {
     }
 
     private fun startRecognition() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите...")
-        }
+        Speaker.stop()
+        val intent = VoiceInput.intent()
         try {
             voiceLauncher.launch(intent)
         } catch (e: ActivityNotFoundException) {

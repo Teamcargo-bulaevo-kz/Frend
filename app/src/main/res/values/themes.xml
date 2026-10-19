@@ -1,6 +1,16 @@
-
 <resources>
-    <style name="Theme.Assistant" parent="Theme.AppCompat.Light.NoActionBar" />
+    <style name="Theme.Assistant" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/chat_accent</item>
+        <item name="colorOnPrimary">@color/chat_on_accent</item>
+        <item name="colorSecondary">@color/chat_accent</item>
+        <item name="android:windowBackground">@color/chat_bg</item>
+        <item name="android:statusBarColor">@color/chat_bg</item>
+        <item name="android:navigationBarColor">@color/chat_bg</item>
+        <item name="android:textColorPrimary">@color/chat_text</item>
+        <item name="android:textColorSecondary">@color/chat_text_dim</item>
+        <item name="android:textColorHint">@color/chat_text_dim</item>
+        <item name="android:windowLightStatusBar">@bool/chat_light_bars</item>
+    </style>
     <style name="Theme.Assistant.Transparent" parent="@android:style/Theme.Translucent.NoTitleBar" />
     <style name="Theme.Music" parent="Theme.MaterialComponents.NoActionBar">
         <item name="android:windowBackground">@color/music_bg</item>

@@ -1,21 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/drawer"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/chat_bg"
     android:fitsSystemWindows="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="12dp">
+        android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="56dp"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
 
             <ImageButton
                 android:id="@+id/menuButton"
@@ -23,7 +26,7 @@
                 android:layout_height="44dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Чаты"
-                android:src="@android:drawable/ic_menu_sort_by_size" />
+                android:src="@drawable/ic_chat_menu" />
 
             <TextView
                 android:id="@+id/chatTitle"
@@ -34,7 +37,8 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="Новый чат"
-                android:textSize="18sp"
+                android:textColor="@color/chat_text"
+                android:textSize="19sp"
                 android:textStyle="bold" />
 
             <ImageButton
@@ -43,75 +47,140 @@
                 android:layout_height="44dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Новый чат"
-                android:src="@android:drawable/ic_menu_add" />
+                android:src="@drawable/ic_chat_add" />
         </LinearLayout>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/messageList"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="8dp"
-            android:layout_weight="1"
-            android:clipToPadding="false" />
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/messageList"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingStart="12dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="8dp" />
+
+            <LinearLayout
+                android:id="@+id/emptyState"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:padding="24dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Привет! Чем помочь?"
+                    android:textColor="@color/chat_text"
+                    android:textSize="22sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="16dp"
+                    android:text="Напиши или скажи. Можно начать с примера:"
+                    android:textColor="@color/chat_text_dim"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:id="@+id/suggestions"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:gravity="bottom"
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="10dp">
 
-            <EditText
-                android:id="@+id/inputField"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Например: поставь будильник на 7:30"
-                android:inputType="textCapSentences|textMultiLine"
-                android:maxLines="4" />
+                android:background="@drawable/input_bg"
+                android:gravity="center_vertical"
+                android:minHeight="52dp"
+                android:orientation="horizontal"
+                android:paddingStart="6dp"
+                android:paddingEnd="2dp">
+
+                <ImageButton
+                    android:id="@+id/attachButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Прикрепить файл"
+                    android:src="@drawable/ic_chat_attach" />
+
+                <EditText
+                    android:id="@+id/inputField"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:hint="Напиши или скажи команду"
+                    android:inputType="textCapSentences|textMultiLine"
+                    android:maxLines="5"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:textColor="@color/chat_text"
+                    android:textColorHint="@color/chat_text_dim"
+                    android:textSize="16sp" />
+
+                <ImageButton
+                    android:id="@+id/micButton"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Голосовой ввод"
+                    android:src="@drawable/ic_chat_mic" />
+            </LinearLayout>
 
             <ImageButton
-                android:id="@+id/attachButton"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="4dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Прикрепить файл"
-                android:src="@android:drawable/ic_input_add" />
-
-            <ImageButton
-                android:id="@+id/micButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:id="@+id/sendButton"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
                 android:layout_marginStart="8dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Голосовой ввод"
-                android:src="@android:drawable/ic_btn_speak_now" />
+                android:background="@drawable/send_bg"
+                android:contentDescription="Отправить"
+                android:src="@drawable/ic_chat_send" />
         </LinearLayout>
-
-        <Button
-            android:id="@+id/sendButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Отправить" />
     </LinearLayout>
 
     <LinearLayout
         android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:background="#FFFFFF"
+        android:background="@color/chat_surface"
         android:clickable="true"
         android:focusable="true"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:paddingTop="8dp">
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/newChatDrawerButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="12dp"
-            android:text="＋ Новый чат" />
+            android:text="＋ Новый чат"
+            app:cornerRadius="14dp" />
 
         <TextView
             android:layout_width="match_parent"
@@ -120,7 +189,7 @@
             android:paddingEnd="16dp"
             android:paddingBottom="4dp"
             android:text="Чаты (долгое нажатие — удалить)"
-            android:textColor="#6B6B70"
+            android:textColor="@color/chat_text_dim"
             android:textSize="12sp" />
 
         <ListView
@@ -128,23 +197,40 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:divider="#E4E4E8"
+            android:divider="@color/chat_stroke"
             android:dividerHeight="1dp" />
 
-        <CheckBox
+        <TextView
+            android:id="@+id/voiceSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:drawableStart="@drawable/ic_chat_volume"
+            android:drawablePadding="12dp"
+            android:gravity="center_vertical"
+            android:padding="16dp"
+            android:text="Голос и скорость озвучки"
+            android:textColor="@color/chat_text"
+            android:textSize="15sp" />
+
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/speakCheck"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingStart="8dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
             android:text="Озвучивать ответы"
-            android:textColor="#1B1B1F" />
+            android:textColor="@color/chat_text" />
 
-        <CheckBox
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/wakeCheck"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingStart="8dp"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="16dp"
             android:text="Слушать «Джарвис» (тратит заряд)"
-            android:textColor="#1B1B1F" />
+            android:textColor="@color/chat_text" />
     </LinearLayout>
 </androidx.drawerlayout.widget.DrawerLayout>

@@ -13,7 +13,7 @@ import android.view.View
 import android.widget.ArrayAdapter
 import android.provider.OpenableColumns
 import android.widget.Button
-import android.widget.CheckBox
+import android.widget.CompoundButton
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ListView
@@ -38,8 +38,9 @@ class MainActivity : AppCompatActivity() {
     private val uiScope = CoroutineScope(Dispatchers.Main)
 
     private lateinit var input: EditText
-    private lateinit var sendButton: Button
+    private lateinit var sendButton: ImageButton
     private lateinit var micButton: ImageButton
+    private lateinit var emptyState: View
     private lateinit var drawer: DrawerLayout
     private lateinit var chatTitle: TextView
     private lateinit var messageList: RecyclerView
@@ -59,7 +60,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val wakePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        findViewById<CheckBox>(R.id.wakeCheck).isChecked = granted
+        findViewById<CompoundButton>(R.id.wakeCheck).isChecked = granted
         if (granted) {
             WakeWordService.setEnabled(this, true)
         } else {
@@ -90,6 +91,7 @@ class MainActivity : AppCompatActivity() {
 
         input = findViewById(R.id.inputField)
         sendButton = findViewById(R.id.sendButton)
+        emptyState = findViewById(R.id.emptyState)
         micButton = findViewById(R.id.micButton)
         drawer = findViewById(R.id.drawer)
         chatTitle = findViewById(R.id.chatTitle)
@@ -101,11 +103,11 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<ImageButton>(R.id.attachButton).setOnClickListener { attachLauncher.launch("*/*") }
 
-        val speakCheck = findViewById<CheckBox>(R.id.speakCheck)
+        val speakCheck = findViewById<CompoundButton>(R.id.speakCheck)
         speakCheck.isChecked = Speaker.enabled(this)
         speakCheck.setOnCheckedChangeListener { _, checked -> Speaker.setEnabled(this, checked) }
 
-        val wakeCheck = findViewById<CheckBox>(R.id.wakeCheck)
+        val wakeCheck = findViewById<CompoundButton>(R.id.wakeCheck)
         wakeCheck.isChecked = WakeWordService.enabled(this) && WakeWordService.hasMicPermission(this)
         wakeCheck.setOnCheckedChangeListener { button, checked ->
             if (!button.isPressed) return@setOnCheckedChangeListener
@@ -117,6 +119,12 @@ class MainActivity : AppCompatActivity() {
                 wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
+
+        findViewById<TextView>(R.id.voiceSettings).setOnClickListener {
+            drawer.closeDrawers()
+            showVoiceSettings()
+        }
+        buildSuggestions()
 
         findViewById<ImageButton>(R.id.menuButton).setOnClickListener {
             refreshChatList()
@@ -180,6 +188,7 @@ class MainActivity : AppCompatActivity() {
         chatTitle.text = ChatHistory.currentTitle(context)
         val history = ChatHistory.load(context)
         adapter.setAll(history)
+        updateEmptyState()
         scrollToEnd()
     }
 
@@ -192,7 +201,7 @@ class MainActivity : AppCompatActivity() {
                 val item = chats[position]
                 (view as TextView).apply {
                     text = item.title
-                    setBackgroundColor(if (item.id == current) 0xFFE3ECFF.toInt() else 0x00000000)
+                    setBackgroundColor(if (item.id == current) ContextCompat.getColor(context, R.color.chat_selected) else 0x00000000)
                 }
                 return view
             }
@@ -236,39 +245,111 @@ class MainActivity : AppCompatActivity() {
         messageList.post { if (adapter.itemCount > 0) messageList.scrollToPosition(adapter.itemCount - 1) }
     }
 
+    private fun updateEmptyState() {
+        emptyState.visibility = if (adapter.itemCount == 0) View.VISIBLE else View.GONE
+    }
+
+    /** Подсказки для пустого чата: нажал — отправилось. */
+    private fun buildSuggestions() {
+        val box = findViewById<android.widget.LinearLayout>(R.id.suggestions)
+        val examples = listOf(
+            "Включи фонарик",
+            "Поставь будильник на 7:30",
+            "Включи спокойную музыку",
+            "Какая погода завтра?"
+        )
+        val dp = resources.displayMetrics.density
+        for (text in examples) {
+            box.addView(TextView(this).apply {
+                this.text = text
+                textSize = 15f
+                setTextColor(ContextCompat.getColor(context, R.color.chat_text))
+                setBackgroundResource(R.drawable.chip_bg)
+                setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (8 * dp).toInt(); gravity = android.view.Gravity.CENTER_HORIZONTAL }
+                setOnClickListener { sendPrompt(text) }
+            })
+        }
+    }
+
+    /** Окно выбора голоса и скорости озвучки. */
+    private fun showVoiceSettings() {
+        Speaker.voices(applicationContext) { voices ->
+            runOnUiThread {
+                val rates = floatArrayOf(0.8f, 0.95f, 1.1f, 1.3f)
+                val rateNames = arrayOf("Медленно", "Спокойно", "Быстрее", "Быстро")
+                var rateIndex = rates.indexOfFirst { kotlin.math.abs(it - Speaker.rate(this)) < 0.03f }.let { if (it < 0) 1 else it }
+                val labels = (listOf("Скорость: ${rateNames[rateIndex]} (нажми, чтобы сменить)") + voices.map { it.label } +
+                    listOf("Проверить голос")).toTypedArray()
+                AlertDialog.Builder(this)
+                    .setTitle("Голос озвучки")
+                    .setItems(labels) { dialog, which ->
+                        when {
+                            which == 0 -> {
+                                rateIndex = (rateIndex + 1) % rates.size
+                                Speaker.setRate(applicationContext, rates[rateIndex])
+                                Toast.makeText(this, "Скорость: ${rateNames[rateIndex]}", Toast.LENGTH_SHORT).show()
+                                Speaker.sample(applicationContext)
+                            }
+                            which == labels.size - 1 -> Speaker.sample(applicationContext)
+                            else -> {
+                                Speaker.setVoice(applicationContext, voices[which - 1].name)
+                                Speaker.sample(applicationContext)
+                            }
+                        }
+                        dialog.dismiss()
+                    }
+                    .setNegativeButton("Закрыть", null)
+                    .show()
+            }
+        }
+    }
+
     private fun sendPrompt(prompt: String) {
         if (busy) return
+        Speaker.stop()
         input.setText("")
         val chatId = ChatHistory.currentId(applicationContext)
         ChatHistory.append(applicationContext, "user", prompt, chatId)
         chatTitle.text = ChatHistory.currentTitle(applicationContext)
         adapter.add(ChatMessage("user", prompt, System.currentTimeMillis()))
+        adapter.showTyping()
+        updateEmptyState()
         scrollToEnd()
 
         busy = true
-        sendButton.isEnabled = false
-        micButton.isEnabled = false
+        setControlsEnabled(false)
 
         uiScope.launch {
-            val answer = repository.handle(prompt)
+            val answer = try {
+                repository.handle(prompt)
+            } catch (e: Exception) {
+                "Что-то пошло не так: ${e.message ?: "неизвестная ошибка"}. Попробуй ещё раз."
+            }
             ChatHistory.append(applicationContext, "assistant", answer, chatId)
             if (Speaker.enabled(applicationContext)) Speaker.speak(applicationContext, answer)
             adapter.add(ChatMessage("assistant", answer, System.currentTimeMillis()))
             scrollToEnd()
             busy = false
-            sendButton.isEnabled = true
-            micButton.isEnabled = true
+            setControlsEnabled(true)
         }
     }
 
+    private fun setControlsEnabled(enabled: Boolean) {
+        sendButton.isEnabled = enabled
+        micButton.isEnabled = enabled
+        sendButton.alpha = if (enabled) 1f else 0.5f
+        micButton.alpha = if (enabled) 1f else 0.5f
+    }
+
     private fun launchVoiceRecognition() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите...")
-        }
+        // Останавливаем озвучку и даём микрофону секунду тишины, иначе он услышит самого ассистента
+        Speaker.stop()
+        val intent = VoiceInput.intent()
         try {
-            voiceLauncher.launch(intent)
+            micButton.postDelayed({ if (!isFinishing) voiceLauncher.launch(intent) }, VoiceInput.AFTER_SPEECH_DELAY_MS)
         } catch (e: Exception) {
             Toast.makeText(this, "На телефоне нет приложения для распознавания речи", Toast.LENGTH_SHORT).show()
         }
@@ -308,6 +389,7 @@ class MainActivity : AppCompatActivity() {
             }
             ChatHistory.append(applicationContext, "assistant", message)
             adapter.add(ChatMessage("assistant", message, System.currentTimeMillis()))
+            updateEmptyState()
             scrollToEnd()
         }
     }

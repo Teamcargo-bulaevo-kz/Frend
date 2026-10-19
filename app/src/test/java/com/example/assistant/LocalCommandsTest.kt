@@ -279,5 +279,9 @@ class LocalCommandsTest {
         org.junit.Assert.assertEquals(false, QuickSettings.stateFrom("Wi-Fi off"))
         org.junit.Assert.assertEquals(true, QuickSettings.stateFrom("Wi-Fi on"))
         org.junit.Assert.assertNull(QuickSettings.stateFrom("Wi-Fi"))
+        org.junit.Assert.assertEquals(false, QuickSettings.stateFrom("Wi-Fi, Выкл."))
+        org.junit.Assert.assertEquals(true, QuickSettings.stateFrom("Bluetooth Вкл"))
+        org.junit.Assert.assertEquals(false, QuickSettings.stateFrom("Bluetooth, Отключено"))
+        org.junit.Assert.assertEquals(true, QuickSettings.stateFrom("Wi-Fi, MyNet, Включено"))
     }
 }
