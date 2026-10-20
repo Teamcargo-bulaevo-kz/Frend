@@ -167,6 +167,20 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         return result
     }
 
+    /**
+     * Поиск в интернете. Погоду берём из прогноза без ИИ; ответ поиска проверяем на бессмыслицу
+     * (температура вроде +65°) и один раз перепроверяем.
+     */
+    private suspend fun webSearchChecked(query: String): String {
+        if (Weather.isWeatherQuery(query)) Weather.report(query)?.let { return it }
+        var answer = client.webSearch(query)
+        if (Sanity.implausibleTemperature(answer)) {
+            answer = client.webSearch("$query (в градусах Цельсия; прошлый ответ был нереальным, проверь данные)")
+            if (Sanity.implausibleTemperature(answer)) answer += Sanity.WARNING
+        }
+        return answer
+    }
+
     /** Уровни 2 и 3: запрос к модели. */
     private suspend fun askModel(prompt: String, normalizedPhrase: String): String {
         val history = ChatHistory.load(context)
@@ -200,7 +214,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             effort = if (commandMode) "low" else "medium",
             maxTokens = if (commandMode) 1024 else 2048
         )) {
-            is GroqResult.FinalText -> result.text
+            is GroqResult.FinalText ->
+                if (Sanity.implausibleTemperature(result.text)) result.text + Sanity.WARNING else result.text
             is GroqResult.FunctionCalls -> {
                 val outputs = result.calls.map { execute(it.name, it.arguments) }
 
@@ -377,7 +392,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
             "find_contact" -> withContext(Dispatchers.IO) { ContactActions.info(context, a.optString("name", "")) }
 
-            "web_search" -> client.webSearch(a.optString("query", ""))
+            "web_search" -> webSearchChecked(a.optString("query", ""))
             "schedule_digest" -> DigestActions.add(context, a.optString("topic", ""), a.optStringOrNull("time"))
             "list_digests" -> DigestActions.list(context)
             "cancel_digest" -> DigestActions.cancel(context, a.optStringOrNull("query"), confirmed)
