@@ -205,12 +205,21 @@ class MusicActivity : AppCompatActivity() {
         menu.menu.add(0, 3, 2, "Подготовить для другого ИИ")
         menu.menu.add(0, 4, 3, "Вставить ответ другого ИИ")
         menu.menu.add(0, 5, 4, "Обновить таблицу Музыка.xlsx")
+        menu.menu.add(0, 6, 5, "Выбрать файл с разметкой…")
+        menu.menu.add(0, 7, 6, "Разметить заново (правки сохранятся)")
+        menu.menu.add(0, 8, 7, "Повторить неопознанные")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> chooseSort()
                 2 -> runInBackground { MusicTagger.start(this) }
                 3 -> runInBackground { MusicAiPack.build(this) }
                 4 -> pasteAiAnswer()
+                6 -> pickTableLauncher.launch("*/*")
+                7 -> AlertDialog.Builder(this).setTitle("Разметить заново?")
+                    .setMessage("Автоматическая разметка сотрётся и ИИ сделает её снова. Твои ручные правки и оценки сохранятся. Это тратит лимит ИИ.")
+                    .setPositiveButton("Разметить") { _, _ -> runInBackground { MusicTagger.start(this, MusicTagger.Mode.REDO) } }
+                    .setNegativeButton("Отмена", null).show()
+                8 -> runInBackground { MusicTagger.start(this, MusicTagger.Mode.RETRY) }
                 5 -> runInBackground {
                     if (MusicCatalog.exportNow(this)) "Таблица обновлена: Assistant/${MusicCatalog.FILE_NAME}"
                     else "Нет доступа к папке Assistant. Разреши доступ ко всем файлам."
@@ -230,6 +239,31 @@ class MusicActivity : AppCompatActivity() {
         }
     }
 
+    /** Файл с разметкой из любого места телефона: копируется во временную папку и разбирается как таблица. */
+    private val pickTableLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        runInBackground {
+            var name = "table.csv"
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0)?.let { name = it }
+            }
+            val safe = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val tmp = java.io.File(cacheDir, "import_" + safe)
+            try {
+                contentResolver.openInputStream(uri)?.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    ?: return@runInBackground "Не получилось открыть файл."
+                val n = MusicCatalog.importFrom(this, tmp)
+                if (n == 0) "Разметку из файла не взял.\n" + MusicCatalog.lastReport + "\n" + MusicCatalog.EXPECTED
+                else {
+                    MusicCatalog.scheduleExport(this)
+                    "Применил разметку: $n песен.\n" + MusicCatalog.lastReport
+                }
+            } finally {
+                tmp.delete()
+            }
+        }
+    }
+
     /** Берёт из буфера обмена ответ другого ИИ (CSV или таблицу) и применяет разметку. */
     private fun pasteAiAnswer() {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -240,8 +274,8 @@ class MusicActivity : AppCompatActivity() {
         }
         runInBackground {
             val n = MusicCatalog.importText(this, text)
-            if (n == 0) "Не нашёл в тексте таблицу. Нужны колонки Исполнитель, Название, Настроение. Скопируй ответ ИИ целиком."
-            else "Применил разметку: $n песен. Остальное можно отдать следующей части."
+            if (n == 0) "Не нашёл в тексте новую разметку.\n" + MusicCatalog.lastReport + "\n" + MusicCatalog.EXPECTED + " Скопируй ответ ИИ целиком."
+            else "Применил разметку: $n песен.\n" + MusicCatalog.lastReport
         }
     }
 

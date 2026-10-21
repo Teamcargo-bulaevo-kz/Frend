@@ -263,7 +263,7 @@ class LocalCommandsTest {
     }
 
     @Test fun webSearchRules() {
-        assertCmd("какие новости", "web_search", "query" to "главные новости сегодня: Казахстан и мир")
+        assertCmd("какие новости", "web_search", "query" to "главные новости сегодня")
         assertCmd("какая погода в астане", "web_search", "query" to "какая погода в астане")
         assertCmd("какой курс доллара", "web_search", "query" to "какой курс доллара")
     }

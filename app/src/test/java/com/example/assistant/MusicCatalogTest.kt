@@ -139,3 +139,60 @@ class MusicCatalogTest {
         assertTrue(text.contains("Агрессивно/Мрачно"))
     }
 }
+
+class FlexibleImportTest {
+    private val matcher = TrackMatcher.build(listOf(
+        "Imagine Dragons" to "Believer", "Ed Sheeran" to "Shape of You", "Мумий Тролль" to "Невеста"
+    ))
+
+    @Test fun matcherFindsLooseNames() {
+        assertEquals("Believer", matcher("Imagine Dragons", "Believer (Official Audio)")?.second)
+        assertEquals("Believer", matcher("", "believer")?.second)
+        assertEquals("Shape of You", matcher("Ed Sheeran", "Ed Sheeran - Shape of You")?.second)
+        assertEquals("Невеста", matcher("Мумий Тролль", "Невеста [muzmo.ru]")?.second)
+        assertNull(matcher("Someone", "Unknown song"))
+    }
+
+    @Test fun englishHeadersAndCombinedColumn() {
+        val rows = listOf(
+            listOf("Track", "Genre", "Mood", "Energy", "BPM", "Description"),
+            listOf("Imagine Dragons - Believer", "Rock", "energetic, dark", "8/10", "125", "Мощный рок"),
+            listOf("Ed Sheeran - Shape of You", "Pop", "Dance", "high", "96", "")
+        )
+        val p = MusicCatalog.parseRows(rows, emptyMap(), matcher)
+        assertEquals(2, p.rows)
+        assertEquals(2, p.matched)
+        val b = p.updates[MusicTags.trackKey("Imagine Dragons", "Believer")]!!
+        assertEquals("rock", b.genre)
+        assertEquals(setOf("dark", "energetic"), b.moods)
+        assertEquals(4, b.energy)
+        assertTrue(b.tempo.contains("быстр"))
+        val s = p.updates[MusicTags.trackKey("Ed Sheeran", "Shape of You")]!!
+        assertEquals(4, s.energy)
+        assertEquals("medium", MusicTags.tempoKey(s.tempo))
+    }
+
+    @Test fun headerNotInFirstRowAndSeveralSheets() {
+        val rows = listOf(
+            listOf("Сгенерировано ИИ"),
+            listOf("Исполнитель", "Название", "Настроение", "Жанр"),
+            listOf("A", "B", "Грустно", "Рок"),
+            listOf("Исполнитель", "Название", "Настроение", "Жанр"),
+            listOf("C", "D", "Весело", "Поп")
+        )
+        val p = MusicCatalog.parseRows(rows, emptyMap())
+        assertEquals(2, p.updates.size)
+    }
+
+    @Test fun unknownMoodWordFallsBackToEnergy() {
+        val rows = listOf(listOf("Artist", "Title", "Mood", "Energy"), listOf("A", "B", "whimsical", "5"))
+        val t = MusicCatalog.parseRows(rows, emptyMap()).updates.values.single()
+        assertEquals("energetic", t.mood)
+        assertTrue(t.confidence < MusicTags.REVIEW_BELOW)
+    }
+
+    @Test fun reportExplainsWhenNothingFound() {
+        val p = MusicCatalog.parseRows(listOf(listOf("a", "b"), listOf("1", "2")), emptyMap())
+        assertTrue(p.report().contains("заголовков"))
+    }
+}

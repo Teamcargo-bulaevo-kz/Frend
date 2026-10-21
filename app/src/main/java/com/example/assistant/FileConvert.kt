@@ -19,7 +19,7 @@ object FileConvert {
     // ---------------------------------------------------------------- xlsx
 
     /** Первый лист книги Excel как таблица строк. Даты остаются числами Excel. */
-    fun xlsxRows(file: File, maxRows: Int = 20000): List<List<String>> {
+    fun xlsxRows(file: File, maxRows: Int = 20000, allSheets: Boolean = false): List<List<String>> {
         ZipFile(file).use { zip ->
             val shared = entry(zip, "xl/sharedStrings.xml")?.let { xml ->
                 Regex("(?s)<si>(.*?)</si>").findAll(xml).map { si ->
@@ -27,12 +27,13 @@ object FileConvert {
                 }.toList()
             }.orEmpty()
 
-            val sheetName = zip.entries().asSequence().map { it.name }
+            val sheetNames = zip.entries().asSequence().map { it.name }
                 .filter { it.startsWith("xl/worksheets/sheet") && it.endsWith(".xml") }
-                .minByOrNull { it.length.toString().padStart(3, '0') + it } ?: return emptyList()
-            val xml = entry(zip, sheetName) ?: return emptyList()
-
+                .sortedBy { it.length.toString().padStart(3, '0') + it }.toList()
+            if (sheetNames.isEmpty()) return emptyList()
             val rows = ArrayList<List<String>>()
+            for (sheetName in if (allSheets) sheetNames else sheetNames.take(1)) {
+            val xml = entry(zip, sheetName) ?: continue
             for (row in Regex("(?s)<row\\b[^>]*?(?:/>|>(.*?)</row>)").findAll(xml)) {
                 if (rows.size >= maxRows) break
                 val cells = ArrayList<String>()
@@ -55,6 +56,7 @@ object FileConvert {
                     cells.add(value)
                 }
                 rows.add(cells)
+            }
             }
             return rows.dropLastWhile { r -> r.all { it.isBlank() } }
         }

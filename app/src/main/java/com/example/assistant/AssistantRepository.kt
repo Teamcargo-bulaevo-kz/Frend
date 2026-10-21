@@ -33,7 +33,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     /** Опасные действия, которые функции запросили подтвердить в ходе этого запроса. */
     private val asks = mutableListOf<PendingAction>()
 
-    private val client = GroqClient(apiKey)
+    private val client = GroqClient(apiKey, context.applicationContext)
     private val summaryBatch = 12
     private val patternDao = NoteDatabase.getInstance(context).commandPatternDao()
 
@@ -167,12 +167,27 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         return result
     }
 
+    /** «Мой город — Астана», «меня зовут Анна»: запоминаем на телефоне, чтобы ассистент знал пользователя. */
+    private suspend fun setProfile(field: String, value: String): String {
+        val v = value.trim().trimEnd('.', '!')
+        if (v.isEmpty()) return "Не расслышал, что запомнить."
+        return when (field.trim().lowercase()) {
+            "name", "имя" -> { UserProfile.setName(context, v); "Хорошо, буду звать тебя $v." }
+            "city", "город" -> {
+                val city = withContext(Dispatchers.IO) { Weather.geocode(v) }
+                if (city == null) "Не нашёл город «$v». Попробуй назвать по-другому."
+                else { UserProfile.setCity(context, city); "Запомнил: твой город — ${city.name}. Погоду и местные данные буду брать для него." }
+            }
+            else -> "Могу запомнить имя или город."
+        }
+    }
+
     /**
      * Поиск в интернете. Погоду берём из прогноза без ИИ; ответ поиска проверяем на бессмыслицу
      * (температура вроде +65°) и один раз перепроверяем.
      */
     private suspend fun webSearchChecked(query: String): String {
-        if (Weather.isWeatherQuery(query)) Weather.report(query)?.let { return it }
+        if (Weather.isWeatherQuery(query)) Weather.report(context, query)?.let { return it }
         var answer = client.webSearch(query)
         if (Sanity.implausibleTemperature(answer)) {
             answer = client.webSearch("$query (в градусах Цельсия; прошлый ответ был нереальным, проверь данные)")
@@ -393,6 +408,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "find_contact" -> withContext(Dispatchers.IO) { ContactActions.info(context, a.optString("name", "")) }
 
             "web_search" -> webSearchChecked(a.optString("query", ""))
+            "set_profile" -> setProfile(a.optString("field", ""), a.optString("value", ""))
             "schedule_digest" -> DigestActions.add(context, a.optString("topic", ""), a.optStringOrNull("time"))
             "list_digests" -> DigestActions.list(context)
             "cancel_digest" -> DigestActions.cancel(context, a.optStringOrNull("query"), confirmed)

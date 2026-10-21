@@ -66,3 +66,31 @@ class WeatherPromptTest {
         assertTrue("слишком длинный: ${p.length}", p.length < 3200)
     }
 }
+
+class UniversalPromptTest {
+    @Test fun noPersonalDataInDefaultPrompt() {
+        val p = AssistantPrompt.build("21.10.2026 12:00", "UTC")
+        for (bad in listOf("Булаево", "Максим", "Казахстан", "тенге")) assertFalse(bad, p.contains(bad))
+        assertTrue(p.contains("не задан"))
+    }
+
+    @Test fun deviceAndUserAreInserted() {
+        val ctx = PromptContext(
+            userName = "Анна", city = "Астана", country = "Казахстан", currency = "KZT (₸)", metric = true, hours24 = true,
+            device = "Xiaomi Redmi, Android 13", available = listOf("фонарик", "NFC"), missing = listOf("доступ к файлам")
+        )
+        val p = AssistantPrompt.build("21.10.2026 12:00", "Asia/Almaty", ctx)
+        for (word in listOf("Анна", "Астана", "KZT", "Xiaomi", "фонарик", "доступ к файлам")) assertTrue(word, p.contains(word))
+        assertTrue("слишком длинный: ${p.length}", p.length < 3800)
+    }
+
+    @Test fun imperialUnitsWhenNotMetric() {
+        val p = AssistantPrompt.build("now", "UTC", PromptContext(metric = false, hours24 = false))
+        assertTrue(p.contains("°F") && p.contains("12-часовое"))
+    }
+
+    @Test fun searchPromptUsesProfile() {
+        val s = AssistantPrompt.search(PromptContext(city = "Лондон", metric = true))
+        assertTrue(s.contains("Лондон") && s.contains("ИТОГ:"))
+    }
+}

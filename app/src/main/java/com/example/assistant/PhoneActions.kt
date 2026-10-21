@@ -306,8 +306,12 @@ object PhoneActions {
      */
     fun openWhatsApp(context: Context, phone: String?, message: String?): String {
         var digits = phone?.filter { it.isDigit() }.orEmpty()
-        // Казахстан и Россия: 8XXXXXXXXXX -> 7XXXXXXXXXX (для WhatsApp нужен международный формат)
-        if (digits.length == 11 && digits.startsWith("8")) digits = "7" + digits.drop(1)
+        // WhatsApp нужен международный формат: приводим номер к нему по стране телефона (8 777… → +7 777…)
+        val e164 = try {
+            if (phone.isNullOrBlank()) null else android.telephony.PhoneNumberUtils.formatNumberToE164(phone, java.util.Locale.getDefault().country)
+        } catch (e: Exception) { null }
+        if (e164 != null) digits = e164.filter { it.isDigit() }
+        else if (digits.length == 11 && digits.startsWith("8")) digits = "7" + digits.drop(1)
         val text = message?.trim().orEmpty()
 
         if (digits.isNotEmpty()) {

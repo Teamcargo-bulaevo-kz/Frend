@@ -91,15 +91,15 @@ object MusicTags {
     }
 
     private val moodWords: List<Pair<String, List<String>>> = listOf(
-        "dark" to listOf("агрессивн", "мрачн", "злую", "злой", "тяжел"),
-        "epic" to listOf("эпичн", "мощн", "героич", "пафосн"),
-        "energetic" to listOf("энергичн", "бодр", "заряжа", "зарядк", "тренировк", "спорт", "пробежк", "качалк", "драйвов"),
-        "calm" to listOf("спокойн", "расслабл", "релакс", "чилл", "для сна", "засыпа", "тиху", "тихие", "медленн", "умиротвор", "лёгк", "легк"),
-        "happy" to listOf("весел", "позитив", "радостн", "жизнерадост", "солнечн", "хорошего настроения"),
-        "sad" to listOf("грустн", "печальн", "тоскл", "меланхол", "погрустить"),
-        "romantic" to listOf("романтич", "любовн", "про любовь", "для свидания"),
-        "dance" to listOf("танцевальн", "танцпол", "вечеринк", "клубн", "потанцева"),
-        "focus" to listOf("для работы", "для учёбы", "для учебы", "сосредоточ", "фонов", "концентрац", "для фона")
+        "dark" to listOf("агрессивн", "мрачн", "злую", "злой", "тяжел", "aggress", "dark", "angry", "heavy", "intense", "brutal"),
+        "epic" to listOf("эпичн", "мощн", "героич", "пафосн", "epic", "powerful", "heroic", "cinematic", "anthem"),
+        "energetic" to listOf("энергичн", "бодр", "заряжа", "зарядк", "тренировк", "спорт", "пробежк", "качалк", "драйвов", "динамичн", "energ", "upbeat", "workout", "pump", "driving", "hype"),
+        "calm" to listOf("спокойн", "расслабл", "релакс", "чилл", "для сна", "засыпа", "тиху", "тихие", "медленн", "умиротвор", "лёгк", "легк", "нежн", "лиричн", "calm", "relax", "chill", "soft", "peaceful", "mellow", "ambient", "sleep", "gentle"),
+        "happy" to listOf("весел", "позитив", "радостн", "жизнерадост", "солнечн", "хорошего настроения", "задорн", "игрив", "happy", "cheer", "joy", "positive", "uplift", "fun", "playful"),
+        "sad" to listOf("грустн", "печальн", "тоскл", "меланхол", "погрустить", "ностальг", "sad", "melanch", "sorrow", "gloom", "nostalg", "emotional"),
+        "romantic" to listOf("романтич", "любовн", "про любовь", "для свидания", "romant", "love", "sensual"),
+        "dance" to listOf("танцевальн", "танцпол", "вечеринк", "клубн", "потанцева", "danc", "party", "club", "groov"),
+        "focus" to listOf("для работы", "для учёбы", "для учебы", "сосредоточ", "фонов", "концентрац", "для фона", "focus", "study", "background", "concentrat", "work")
     ).map { (k, v) -> k to v.map { TextMatch.normalize(it) } }
 
     /** «спокойную», «для работы», «энергичные» → ключ настроения. null — настроение в тексте не названо. */
@@ -323,6 +323,40 @@ object MusicTags {
     fun clear(context: Context) {
         cache = LinkedHashMap()
         file(context).delete()
+    }
+
+    /**
+     * Сбрасывает автоматическую разметку, чтобы ИИ сделал её заново. Ручные правки пользователя остаются,
+     * оценки (лайк/дизлайк) тоже. Возвращает число сброшенных песен.
+     */
+    @Synchronized
+    fun resetAuto(context: Context): Int {
+        val map = loaded(context)
+        var n = 0
+        val it = map.entries.iterator()
+        val keep = LinkedHashMap<String, TrackTags>()
+        while (it.hasNext()) {
+            val (k, v) = it.next()
+            if (v.edited) continue
+            if (isTagged(v)) n++
+            it.remove()
+            if (v.liked != 0) keep[k] = TrackTags("other", "calm", 3, confidence = 0, artist = v.artist, title = v.title, album = v.album, liked = v.liked)
+        }
+        map.putAll(keep)
+        persist(context, map)
+        return n
+    }
+
+    /** Снимает пометку «ИИ уже пробовал» у неразмеченных песен, чтобы разметка попробовала их ещё раз. */
+    @Synchronized
+    fun resetFailed(context: Context): Int {
+        val map = loaded(context)
+        var n = 0
+        for ((k, v) in map.entries.toList()) {
+            if (!isTagged(v) && v.aiTried) { map[k] = v.copy(aiTried = false); n++ }
+        }
+        if (n > 0) persist(context, map)
+        return n
     }
 
     /** Треки с нужным настроением и/или жанром; дизлайкнутые не попадают. */

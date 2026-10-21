@@ -19,7 +19,7 @@ class DigestReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val text = try {
-                    GroqClient(BuildConfig.GROQ_API_KEY).webSearch(digest.topic)
+                    GroqClient(BuildConfig.GROQ_API_KEY, context.applicationContext).webSearch(digest.topic)
                 } catch (e: Exception) {
                     "Не получилось найти: ${e.message?.take(120)}"
                 }

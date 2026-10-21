@@ -60,18 +60,38 @@ object MusicTagger {
 
     // ---------------------------------------------------------------- запуск
 
-    /** Запуск по просьбе пользователя. Возвращает текст для ответа. */
-    fun start(context: Context, redo: Boolean = false): String {
+    enum class Mode { NEW, RETRY, REDO }
+
+    /**
+     * Запуск по просьбе пользователя. NEW — только новые песни (если новых нет, сам повторяет те, что ИИ раньше не смог определить),
+     * RETRY — повторить неопознанные, REDO — разметить всё заново (ручные правки и оценки сохраняются).
+     */
+    fun start(context: Context, mode: Mode = Mode.NEW): String {
         if (running) return progressText()
         val app = context.applicationContext
         val music = MusicLibrary.index(app, force = true).allMusic()
         if (music.isEmpty()) return "Не вижу музыку на телефоне. Разреши доступ к аудио."
-        if (redo) MusicTags.clear(app)
+        var effective = mode
+        if (mode == Mode.REDO) {
+            MusicTags.resetAuto(app)
+            // Таблица Музыка.xlsx перезаписывается пустой, иначе старая разметка подхватилась бы обратно
+            try { MusicCatalog.exportNow(app) } catch (e: Exception) { /* нет доступа к папке */ }
+        }
         prefs(app).edit().remove(KEY_BLOCKED_UNTIL).apply()
+        if (mode == Mode.NEW && untaggedCount(app, music) == 0 && MusicTags.resetFailed(app) > 0) effective = Mode.RETRY
+        if (mode == Mode.RETRY) MusicTags.resetFailed(app)
         val untagged = untaggedCount(app, music)
-        if (untagged == 0) return "Новых песен для разметки нет (${music.size} треков). Неопознанные можно отдать другому ИИ: скажи «подготовь музыку для другого ИИ»."
+        if (untagged == 0) {
+            return "Все ${music.size} треков уже размечены. Чтобы сделать это заново, скажи «разметь музыку заново». " +
+                "Свой файл с разметкой можно подгрузить: меню ⋮ → «Выбрать файл с разметкой»."
+        }
         startRun(app)
-        return "Начал разметку: новых песен $untagged. Идёт в фоне, можно пользоваться телефоном. Когда закончу, пришлю уведомление."
+        val what = when (effective) {
+            Mode.REDO -> "Размечаю заново (твои правки и оценки сохранены)"
+            Mode.RETRY -> "Повторяю неопознанные"
+            Mode.NEW -> "Начал разметку"
+        }
+        return "$what: песен $untagged. Идёт в фоне, можно пользоваться телефоном. Когда закончу, пришлю уведомление."
     }
 
     /**

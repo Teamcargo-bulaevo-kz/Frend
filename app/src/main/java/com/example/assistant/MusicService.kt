@@ -35,6 +35,7 @@ class MusicService : Service() {
         const val ACTION_NEXT = "com.example.assistant.music.NEXT"
         const val ACTION_PREV = "com.example.assistant.music.PREV"
         const val ACTION_STOP = "com.example.assistant.music.STOP"
+        const val ACTION_LIKE = "com.example.assistant.music.LIKE"
 
         private const val CHANNEL_ID = "music_playback"
         private const val NOTIFICATION_ID = 1001
@@ -116,6 +117,9 @@ class MusicService : Service() {
                 override fun onSkipToPrevious() = previous()
                 override fun onStop() = stopPlayback()
                 override fun onSeekTo(pos: Long) = seekTo(pos.toInt())
+                override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+                    if (action == ACTION_LIKE) toggleLike()
+                }
             })
             isActive = true
         }
@@ -138,6 +142,7 @@ class MusicService : Service() {
             ACTION_NEXT -> next(auto = false)
             ACTION_PREV -> previous()
             ACTION_STOP -> stopPlayback()
+            ACTION_LIKE -> toggleLike()
         }
         if (queue.isEmpty()) stopSelf()
         return START_NOT_STICKY
@@ -389,6 +394,16 @@ class MusicService : Service() {
         }
     }
 
+    /** Сердечко в шторке и на экране блокировки: нравится / не нравится для играющей песни. */
+    private fun toggleLike() {
+        val track = queue.getOrNull(index) ?: return
+        val now = MusicTags.likedOf(this, track)
+        MusicTags.setLiked(this, track, if (now > 0) 0 else 1)
+        refreshState()
+    }
+
+    private fun isLiked(): Boolean = queue.getOrNull(index)?.let { MusicTags.likedOf(this, it) > 0 } == true
+
     private fun serviceIntent(action: String): PendingIntent = PendingIntent.getService(
         this, action.hashCode(),
         Intent(this, MusicService::class.java).setAction(action),
@@ -421,6 +436,10 @@ class MusicService : Service() {
                 }
             )
             .addAction(action(android.R.drawable.ic_media_next, "Дальше", ACTION_NEXT))
+            .addAction(
+                if (isLiked()) action(R.drawable.ic_heart_filled, "Убрать из любимых", ACTION_LIKE)
+                else action(R.drawable.ic_heart, "Нравится", ACTION_LIKE)
+            )
             .addAction(action(android.R.drawable.ic_menu_close_clear_cancel, "Стоп", ACTION_STOP))
         session?.let {
             builder.setStyle(
@@ -447,6 +466,13 @@ class MusicService : Service() {
                     PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
                         PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or
                         PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP or PlaybackState.ACTION_SEEK_TO
+                )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(
+                        ACTION_LIKE,
+                        if (isLiked()) "Убрать из любимых" else "Нравится",
+                        if (isLiked()) R.drawable.ic_heart_filled else R.drawable.ic_heart
+                    ).build()
                 )
                 .setState(
                     if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,

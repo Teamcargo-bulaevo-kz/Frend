@@ -145,6 +145,8 @@ object MusicActions {
         if (music.isEmpty()) return NO_ACCESS
         return when (action.trim().lowercase()) {
             "analyze" -> MusicTagger.start(context)
+            "retry" -> MusicTagger.start(context, MusicTagger.Mode.RETRY)
+            "reanalyze", "redo" -> MusicTagger.start(context, MusicTagger.Mode.REDO)
             "status" -> MusicTags.summary(context, music) + if (MusicTagger.running) "\n" + MusicTagger.progressText() else ""
             "export" -> exportList(context)
             "import" -> importTable(context, file)
@@ -153,24 +155,35 @@ object MusicActions {
         }
     }
 
-    /** Подхватывает готовые таблицы с разметкой (xlsx, csv, txt) из Входящих; можно назвать файл. */
+    /** Подхватывает готовые таблицы с разметкой (xlsx, csv, tsv, txt, md) из Входящих, Assistant, Загрузок и Документов; можно назвать файл. */
     private fun importTable(context: Context, file: String?): String {
         if (!SharedFolder.ensure()) return "Нет доступа к общей папке Assistant. Разреши доступ ко всем файлам в настройках."
-        val ext = setOf("xlsx", "csv", "txt")
-        val inbox = SharedFolder.inbox().listFiles { f -> f.isFile && f.extension.lowercase() in ext }.orEmpty().toList()
-        val wanted = file?.trim().orEmpty()
+        val ext = setOf("xlsx", "csv", "tsv", "txt", "md")
+        val storage = android.os.Environment.getExternalStorageDirectory()
+        val dirs = listOf(SharedFolder.inbox(), SharedFolder.root(), java.io.File(storage, "Download"), java.io.File(storage, "Documents"))
+        val all = dirs.flatMap { d -> d.listFiles { f -> f.isFile && f.extension.lowercase() in ext }.orEmpty().toList() }
+            .filter { it.name != MusicCatalog.FILE_NAME }
+            .distinctBy { it.absolutePath }
+        val wanted = TextMatch.normalize(file.orEmpty())
         val sources = if (wanted.isNotEmpty()) {
-            val all = inbox + SharedFolder.root().listFiles { f -> f.isFile && f.extension.lowercase() in ext }.orEmpty().toList()
-            listOfNotNull(all.firstOrNull { it.name.equals(wanted, true) || it.nameWithoutExtension.equals(wanted, true) })
-        } else inbox
-        if (sources.isEmpty()) return "Не нашёл таблицу. Положи xlsx или csv во Входящие и скажи «импортируй таблицу музыки»."
+            all.filter { val n = TextMatch.normalize(it.nameWithoutExtension); n == wanted || n.contains(wanted) || wanted.contains(n) }
+        } else {
+            // Без названия: свежие файлы за последние 60 дней, новые первыми (разметка от ИИ обычно только что скачана)
+            val limit = System.currentTimeMillis() - 60L * 24 * 3600 * 1000
+            all.filter { it.lastModified() >= limit }.sortedByDescending { it.lastModified() }.take(8)
+        }
+        if (sources.isEmpty()) {
+            return "Не нашёл файл с разметкой во Входящих, Загрузках и Документах. Положи его туда и скажи «импортируй разметку», " +
+                "или в приложении «Музыка»: меню ⋮ → «Выбрать файл с разметкой»."
+        }
         var total = 0
         val used = ArrayList<String>()
+        val reports = ArrayList<String>()
         for (f in sources) {
             val n = MusicCatalog.importFrom(context, f)
-            if (n > 0) { total += n; used.add(f.name) }
+            if (n > 0) { total += n; used.add(f.name) } else reports.add(MusicCatalog.lastReport)
         }
-        if (total == 0) return "Не нашёл в файлах новой разметки (нужны колонки Исполнитель, Название, Настроение)."
+        if (total == 0) return "Файлы нашёл, но разметку из них не взял.\n" + reports.take(3).joinToString("\n") + "\n" + MusicCatalog.EXPECTED
         MusicCatalog.scheduleExport(context)
         return "Подхватил разметку: $total песен из ${used.joinToString(", ") { "«$it»" }}. " + MusicTagger.start(context)
     }

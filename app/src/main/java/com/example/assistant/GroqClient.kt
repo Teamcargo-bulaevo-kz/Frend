@@ -29,7 +29,9 @@ sealed class GroqResult {
 
 class GroqApiException(val code: Int, body: String) : Exception("Groq API error $code: $body")
 
-class GroqClient(private val apiKey: String) {
+class GroqClient(private val apiKey: String, private val appContext: android.content.Context? = null) {
+
+    private fun promptContext(): PromptContext = appContext?.let { DeviceInfo.promptContext(it) } ?: PromptContext()
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -41,7 +43,7 @@ class GroqClient(private val apiKey: String) {
     /** Короткий системный промпт (экономит токены). Собирается при каждом запросе, чтобы модель знала время. */
     fun systemPrompt(): String {
         val now = SimpleDateFormat("dd.MM.yyyy HH:mm, EEEE", Locale("ru")).format(Date())
-        return AssistantPrompt.build(now, TimeZone.getDefault().id)
+        return AssistantPrompt.build(now, TimeZone.getDefault().id, promptContext())
     }
 
     /**
@@ -79,11 +81,7 @@ class GroqClient(private val apiKey: String) {
      * (тот же ключ). Возвращает короткий ответ с названиями источников.
      */
     suspend fun webSearch(query: String): String {
-        val system = "Найди в интернете актуальную информацию и ответь по-русски кратко, не больше 100 слов: главное, цифры и даты. " +
-            "Если место не указано, это Булаево (Северо-Казахстанская область, Казахстан). Температуру давай в °C, скорость в м/с, деньги с валютой. " +
-            "Проверь цифры на правдоподобие (температура воздуха от −60 до +55 °C): нереальное не пиши, перепроверь. " +
-            "Бери данные только из найденных источников, ничего не выдумывай; если данных нет, так и скажи. " +
-            "В конце назови 1–2 источника по названию сайта. Ответ начни со слова «ИТОГ:»."
+        val system = AssistantPrompt.search(promptContext())
         return webAsk(system, query, 2000)
     }
 

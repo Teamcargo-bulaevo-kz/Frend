@@ -189,106 +189,220 @@ object MusicCatalog {
         return FileConvert.parseCsv(lines.joinToString("\n"), if (first.count { it == ';' } >= first.count { it == ',' }) ';' else ',')
     }
 
-    /** Строки таблицы из файла: xlsx, csv или txt. */
+    /** Строки таблицы из файла: xlsx (все листы), csv, tsv, txt или md. */
     fun readAnyTable(file: File): List<List<String>> = when (file.extension.lowercase()) {
-        "xlsx" -> try { FileConvert.xlsxRows(file) } catch (e: Exception) { emptyList() }
+        "xlsx" -> try { FileConvert.xlsxRows(file, allSheets = true) } catch (e: Exception) { emptyList() }
         else -> try { parseTextTable(file.readText(Charsets.UTF_8)) } catch (e: Exception) { emptyList() }
+    }
+
+    /** Что получилось при последнем импорте: для понятного сообщения, если файл не подошёл. */
+    @Volatile var lastReport: String = ""
+        private set
+
+    /** Подсказка, что ожидается в файле. */
+    const val EXPECTED = "Нужна таблица, где у каждой песни есть исполнитель и название, плюс хотя бы настроение или жанр " +
+        "(заголовки по-русски или по-английски: Исполнитель/Artist, Название/Title, Настроение/Mood, Жанр/Genre…)."
+
+    /** Сопоставление с песнями на этом телефоне: нечёткое, чтобы «Artist - Song (Official)» нашлось как «Song». */
+    private fun resolver(context: Context): (String, String) -> Pair<String, String>? {
+        val device = try { MusicLibrary.index(context).allMusic().map { it.artist to it.title } } catch (e: Exception) { emptyList() }
+        return TrackMatcher.build(device)
     }
 
     /** Вставка ответа другого ИИ: разбирает текст и применяет разметку. Возвращает число обновлённых песен. */
     fun importText(context: Context, text: String): Int {
-        val parsed = parseRows(parseTextTable(text), MusicTags.all(context))
+        val parsed = parseRows(parseTextTable(text), MusicTags.all(context), resolver(context))
+        lastReport = parsed.report()
         if (parsed.updates.isNotEmpty()) MusicTags.putAll(context, parsed.updates)
         if (parsed.folders.isNotEmpty()) restoreFolders(context, parsed.folders)
         return parsed.updates.size
     }
 
-    /** Результат разбора таблицы: изменённые теги по ключам песен и папки по ключам песен. */
-    class Parsed(val updates: Map<String, TrackTags>, val folders: List<Pair<String, List<String>>>)
+    /** Результат разбора таблицы: изменённые теги по ключам песен и папки по ключам песен, плюс статистика. */
+    class Parsed(
+        val updates: Map<String, TrackTags>,
+        val folders: List<Pair<String, List<String>>>,
+        val rows: Int = 0,
+        val matched: Int = 0,
+        val columns: String = ""
+    ) {
+        fun report(): String = when {
+            rows == 0 && columns.isEmpty() -> "Не нашёл в файле заголовков с исполнителем и названием песни."
+            rows == 0 -> "В файле нет строк с песнями (колонки: $columns)."
+            else -> "Строк с песнями: $rows, совпало с музыкой на телефоне: $matched, обновлено: ${updates.size}. Колонки: $columns."
+        }
+    }
 
-    /** Читает таблицу в нашем или твоём формате songs_by_mood.xlsx. Возвращает число песен, у которых теги обновились. */
+    /** Читает таблицу в нашем формате или в формате другого ИИ. Возвращает число песен, у которых теги обновились. */
     fun importFrom(context: Context, file: File): Int {
         val rows = readAnyTable(file)
-        val parsed = parseRows(rows, MusicTags.all(context))
+        val parsed = parseRows(rows, MusicTags.all(context), resolver(context))
+        lastReport = "«${file.name}»: " + parsed.report()
         if (parsed.updates.isNotEmpty()) MusicTags.putAll(context, parsed.updates, export = false)
         if (parsed.folders.isNotEmpty()) restoreFolders(context, parsed.folders)
         return parsed.updates.size
     }
 
-    /** Чистый разбор строк таблицы (первая — заголовок). Без Android, поэтому покрыт тестами. */
-    fun parseRows(rows: List<List<String>>, local: Map<String, TrackTags>): Parsed {
-        val empty = Parsed(emptyMap(), emptyList())
-        if (rows.size < 2) return empty
-        val head = rows[0].map { it.trim().lowercase() }
-        fun col(vararg names: String): Int = head.indexOfFirst { h -> names.any { h.contains(it) } }
-        val cArtist = col("исполнитель")
-        val cTitle = col("назван")
-        if (cArtist < 0 || cTitle < 0) return empty
-        val cAlbum = col("альбом")
-        val cGenre = col("жанр")
-        val cMood = col("настроен")
-        val cEnergy = col("энергичн")
-        val cTempo = col("ритм", "темп")
-        val cDesc = col("описан")
-        val cConf = col("уверенн")
-        val cNote = col("пометк")
-        val cLiked = col("нравит")
-        // «Альбом (папка)» тоже содержит слово «папка», поэтому ищем колонку именно «Папки»
-        val cFolders = head.indexOfFirst { it == "папки" }
-        val cSource = col("источник")
+    // ---------------------------------------------------------------- разбор таблицы
 
-        fun cell(row: List<String>, c: Int) = if (c >= 0) row.getOrNull(c)?.trim().orEmpty() else ""
+    private class Cols(
+        val artist: Int, val title: Int, val combined: Boolean, val album: Int, val genre: Int, val mood: Int, val energy: Int,
+        val tempo: Int, val desc: Int, val conf: Int, val note: Int, val liked: Int, val folders: Int, val source: Int, val names: String
+    ) {
+        val known: Int get() = listOf(artist, title, album, genre, mood, energy, tempo, desc, conf, liked).count { it >= 0 }
+    }
 
+    private val artistWords = listOf("исполнитель", "артист", "автор", "singer", "artist", "performer", "музыкант")
+    private val titleWords = listOf("назван", "трек", "песн", "композиц", "title", "track", "song", "name")
+
+    /** Заголовок таблицы или null, если строка на него не похожа. Слова ищутся по вхождению, без учёта регистра. */
+    private fun detectHeader(row: List<String>): Cols? {
+        val head = row.map { it.trim().lowercase() }
+        if (head.count { it.isNotEmpty() } < 2) return null
+        fun col(vararg names: String): Int = head.indexOfFirst { h -> h.isNotEmpty() && names.any { h.contains(it) } }
+        val artist = col(*artistWords.toTypedArray())
+        // «Название», но не «Альбом (название)»
+        val title = head.indexOfFirst { h -> h.isNotEmpty() && !h.contains("альбом") && !h.contains("album") && titleWords.any { h.contains(it) } }
+        if (title < 0) return null
+        val mood = col("настроен", "mood", "vibe", "эмоци")
+        val genre = col("жанр", "genre", "style", "стиль")
+        val energy = col("энергичн", "энерг", "energy")
+        // Это точно строка заголовка, если кроме названия есть ещё хотя бы одна известная колонка
+        if (artist < 0 && mood < 0 && genre < 0 && energy < 0) return null
+        val folders = head.indexOfFirst { it == "папки" || it == "folders" || it == "playlists" || it == "плейлисты" }
+        val names = head.filter { it.isNotEmpty() }.take(12).joinToString(", ")
+        return Cols(
+            artist = artist, title = title, combined = artist < 0,
+            album = col("альбом", "album"), genre = genre, mood = mood, energy = energy,
+            tempo = col("ритм", "темп", "tempo", "bpm"), desc = col("описан", "description", "comment", "коммент"),
+            conf = col("уверенн", "confidence"), note = col("пометк", "note"), liked = col("нравит", "liked", "like", "favorite", "любим"),
+            folders = folders, source = col("источник", "source"), names = names
+        )
+    }
+
+    private val splitDash = Regex("\\s+[-–—]\\s+")
+
+    /** «5», «4/5», «8/10», «высокая», «low» → 1..5. */
+    internal fun parseEnergy(text: String): Int? {
+        val t = text.trim().lowercase()
+        if (t.isEmpty()) return null
+        Regex("^(\\d+(?:[.,]\\d+)?)\\s*/\\s*(\\d+)$").find(t)?.let {
+            val v = it.groupValues[1].replace(',', '.').toDouble()
+            val max = it.groupValues[2].toDouble()
+            if (max > 0) return Math.round(v / max * 5).toInt().coerceIn(1, 5)
+        }
+        t.replace(',', '.').toDoubleOrNull()?.let { return if (it > 5) Math.round(it / 2).toInt().coerceIn(1, 5) else Math.round(it).toInt().coerceIn(1, 5) }
+        return when {
+            "очень выс" in t || "very high" in t || "extreme" in t -> 5
+            "очень низ" in t || "very low" in t -> 1
+            "выс" in t || "high" in t || "энергич" in t -> 4
+            "низ" in t || "low" in t || "спокой" in t -> 2
+            "сред" in t || "medium" in t || "mid" in t || "moderate" in t -> 3
+            else -> null
+        }
+    }
+
+    /** «128», «128 BPM», «fast», «быстрый» → подпись темпа как в нашей таблице; непонятное остаётся как есть. */
+    internal fun parseTempo(text: String): String {
+        val t = text.trim()
+        if (t.isEmpty()) return ""
+        MusicTags.tempoKey(t)?.let { return MusicTags.tempos[it].orEmpty() }
+        Regex("(\\d{2,3})").find(t)?.let {
+            val bpm = it.groupValues[1].toInt()
+            return MusicTags.tempos[if (bpm < 90) "slow" else if (bpm <= 110) "medium" else "fast"].orEmpty()
+        }
+        return t
+    }
+
+    /** Чистый разбор строк таблицы. Заголовок может быть не первой строкой и повторяться (несколько листов). Без Android, покрыт тестами. */
+    fun parseRows(
+        rows: List<List<String>>,
+        local: Map<String, TrackTags>,
+        resolve: ((String, String) -> Pair<String, String>?)? = null
+    ): Parsed {
+        var c: Cols? = null
         val updates = LinkedHashMap<String, TrackTags>()
         val folderRows = ArrayList<Pair<String, List<String>>>()
-        for (row in rows.drop(1)) {
-            val artist = cell(row, cArtist)
-            val title = cell(row, cTitle)
+        var count = 0
+        var matched = 0
+        var firstColumns = ""
+
+        for (row in rows) {
+            val header = detectHeader(row)
+            // Следующий заголовок (другой лист) принимаем только если он явно похож на заголовок: данные песни не должны его имитировать
+            if (header != null && (c == null || header.known >= 3)) {
+                c = header
+                if (firstColumns.isEmpty()) firstColumns = header.names
+                continue
+            }
+            val cols = c ?: continue
+            fun cell(i: Int) = if (i >= 0) row.getOrNull(i)?.trim().orEmpty() else ""
+
+            var artist = cell(cols.artist)
+            var title = cell(cols.title)
+            if (cols.combined) {
+                val parts = splitDash.split(title, 2)
+                if (parts.size == 2) { artist = parts[0].trim(); title = parts[1].trim() }
+            }
             if (title.isEmpty()) continue
+            count++
+            val fileArtist = artist
+            val fileTitle = title
+            resolve?.invoke(artist, title)?.let { (a, t) -> artist = a; title = t; matched++ }
             val key = MusicTags.trackKey(artist, title)
-            val liked = likedFromLabel(cell(row, cLiked))
-            val folders = cell(row, cFolders).split(';', ',').map { it.trim() }.filter { it.isNotEmpty() }
+            val liked = likedFromLabel(cell(cols.liked))
+            val folders = cell(cols.folders).split(';', ',').map { it.trim() }.filter { it.isNotEmpty() }
             if (folders.isNotEmpty()) folderRows.add(key to folders)
 
-            val moods = MusicTags.moodsFromText(cell(row, cMood))
+            val moodText = cell(cols.mood)
+            var moods = MusicTags.moodsFromText(moodText)
             val old = local[key]
+            val unknownLabel = moodText.lowercase().let { it.contains("не определ") || it == "-" || it == "—" }
+            val energy = parseEnergy(cell(cols.energy))
+            // Настроение названо незнакомым словом: берём из описания, иначе по энергичности. Такую строку стоит проверить (уверенность ниже)
+            var guessed = false
+            if (moods.isEmpty() && moodText.isNotEmpty() && !unknownLabel) {
+                MusicTags.moodFromWords(cell(cols.desc))?.let { moods = setOf(it) }
+                if (moods.isEmpty()) moods = setOf(if ((energy ?: 3) >= 4) "energetic" else if ((energy ?: 3) <= 2) "calm" else "happy")
+                guessed = true
+            }
             if (moods.isEmpty()) {
-                // «Не определено»: разметки в файле нет, но лайк сохраняем
+                // Разметки нет: сохраняем лайк
                 if (liked != 0 && (old == null || old.liked != liked)) {
-                    updates[key] = (old ?: TrackTags("other", "calm", 3, confidence = 0, artist = artist, title = title, album = cell(row, cAlbum))).copy(liked = liked)
+                    updates[key] = (old ?: TrackTags("other", "calm", 3, confidence = 0, artist = artist, title = title, album = cell(cols.album))).copy(liked = liked)
                 }
                 continue
             }
-            val source = sourceFromLabel(cell(row, cSource))
+            val source = sourceFromLabel(cell(cols.source))
             val fileEdit = source == TrackTags.SOURCE_USER
-            // Локальная ручная правка важнее строки из файла, кроме строк, помеченных «Вручную»
             if (old != null && old.edited && !fileEdit) {
                 if (old.liked != liked && liked != 0) updates[key] = old.copy(liked = liked)
                 continue
             }
-            val genreLabel = cell(row, cGenre)
+            val genreLabel = cell(cols.genre)
             val genreKey = if (genreLabel.isEmpty()) "other" else
                 (MusicTags.genres.entries.firstOrNull { it.value.equals(genreLabel, true) }?.key ?: MusicTags.genreKeyFromLabel(genreLabel))
-            val fileConf = confidenceFromLabel(cell(row, cConf))
+            val fileConf = confidenceFromLabel(cell(cols.conf))
             val conf = when {
                 fileEdit -> 100
+                guessed -> 50
                 fileConf == null -> 70
                 old != null && confidenceLabel(old.confidence) == confidenceLabel(fileConf) -> old.confidence
                 else -> fileConf
             }
-            val noteText = cell(row, cNote)
+            val noteText = cell(cols.note)
             val tags = TrackTags(
-                genre = genreKey, mood = moods.first(), energy = cell(row, cEnergy).toDoubleOrNull()?.toInt()?.coerceIn(1, 5) ?: 3,
+                genre = genreKey, mood = moods.first(), energy = energy ?: 3,
                 moods = moods, genreLabel = if (genreLabel.equals(MusicTags.genres[genreKey], true)) "" else genreLabel,
-                tempo = cell(row, cTempo), description = cell(row, cDesc), confidence = conf, source = source,
+                tempo = parseTempo(cell(cols.tempo)), description = cell(cols.desc), confidence = conf, source = source,
                 liked = if (liked != 0) liked else (old?.liked ?: 0), edited = fileEdit || (old?.edited ?: false),
                 webTried = old?.webTried ?: false, aiTried = old?.aiTried ?: false,
                 note = if (noteText == AUTO_NOTE || noteText.startsWith("ИИ: уточни")) "" else noteText,
-                artist = artist, title = title, album = cell(row, cAlbum)
+                artist = artist.ifEmpty { fileArtist }, title = title.ifEmpty { fileTitle }, album = cell(cols.album)
             )
             if (old != tags) updates[key] = tags
         }
-        return Parsed(updates, folderRows)
+        return Parsed(updates, folderRows, count, matched, firstColumns)
     }
 
     /** Папки из таблицы возвращаются в плейлисты: песни ищутся на этом устройстве по исполнителю и названию. */

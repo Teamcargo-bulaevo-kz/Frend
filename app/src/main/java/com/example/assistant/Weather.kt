@@ -1,5 +1,6 @@
 package com.example.assistant
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -24,11 +25,6 @@ object Weather {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-
-    // Булаево по умолчанию
-    private const val HOME_NAME = "Булаево"
-    private const val HOME_LAT = 54.9
-    private const val HOME_LON = 70.45
 
     private val stop = setOf(
         "сегодня", "завтра", "послезавтра", "сейчас", "на", "неделю", "недели", "выходные", "ближайшие", "дни", "день",
@@ -156,35 +152,47 @@ object Weather {
         null
     }
 
+    /** Найти город по названию (с учётом падежей: «в Астане»). Блокирующий, вызывать из фона. */
+    fun geocode(name: String): UserProfile.City? {
+        for (variant in cityVariants(TextMatch.normalize(name))) {
+            val geo = get(
+                "https://geocoding-api.open-meteo.com/v1/search?name=" + URLEncoder.encode(variant, "UTF-8") +
+                    "&count=5&language=ru"
+            )?.optJSONArray("results") ?: continue
+            val list = (0 until geo.length()).map { geo.getJSONObject(it) }
+            val region = java.util.Locale.getDefault().country
+            // Сначала город из страны пользователя, потом соседние страны, потом любой
+            val pick = list.firstOrNull { it.optString("country_code") == region }
+                ?: list.firstOrNull { it.optString("country_code") in setOf("KZ", "RU", "UA", "BY") }
+                ?: list.firstOrNull() ?: continue
+            return UserProfile.City(pick.optString("name", variant), pick.getDouble("latitude"), pick.getDouble("longitude"))
+        }
+        return null
+    }
+
+    const val NO_CITY = "Не знаю, где вы находитесь. Скажите «мой город — …» (например, «мой город — Астана») или «погода в Астане»."
+
     /** Готовый ответ о погоде или null, если не вышло (тогда работает обычный поиск). */
-    suspend fun report(query: String): String? = withContext(Dispatchers.IO) {
+    suspend fun report(context: Context, query: String): String? = withContext(Dispatchers.IO) {
         val q = parseQuery(query)
-        var place = HOME_NAME
-        var lat = HOME_LAT
-        var lon = HOME_LON
-        if (q.city != null && TextMatch.normalize(q.city) != "булаево") {
-            var found = false
-            for (variant in cityVariants(q.city)) {
-                val geo = get(
-                    "https://geocoding-api.open-meteo.com/v1/search?name=" + URLEncoder.encode(variant, "UTF-8") +
-                        "&count=5&language=ru"
-                )?.optJSONArray("results") ?: continue
-                val list = (0 until geo.length()).map { geo.getJSONObject(it) }
-                val pick = list.firstOrNull { it.optString("country_code") in setOf("KZ", "RU", "UA", "BY") } ?: list.firstOrNull() ?: continue
-                place = pick.optString("name", variant)
-                lat = pick.getDouble("latitude")
-                lon = pick.getDouble("longitude")
-                found = true
-                break
+        var guessed = false
+        val city: UserProfile.City = when {
+            q.city != null -> geocode(q.city) ?: return@withContext null
+            else -> UserProfile.city(context) ?: run {
+                // Города нет: пробуем угадать по часовому поясу телефона (Asia/Almaty → Almaty) и честно предупреждаем
+                val zone = java.util.TimeZone.getDefault().id.substringAfter('/', "").replace('_', ' ')
+                val guess = if (zone.isBlank()) null else geocode(zone)
+                guessed = guess != null
+                guess ?: return@withContext NO_CITY
             }
-            if (!found) return@withContext null
         }
         val json = get(
-            "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+            "https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}" +
                 "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m" +
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max" +
                 "&wind_speed_unit=ms&timezone=auto&forecast_days=7"
         ) ?: return@withContext null
-        format(place, json, q)
+        val text = format(city.name, json, q) ?: return@withContext null
+        if (guessed) text + "\n(Город определил по часовому поясу. Если это не так, скажите «мой город — …».)" else text
     }
 }
