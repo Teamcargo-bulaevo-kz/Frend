@@ -659,7 +659,7 @@ class MusicActivity : AppCompatActivity() {
                 holder.heart.setOnClickListener {
                     val now = MusicTags.likedOf(ctx, track)
                     MusicTags.setLiked(ctx, track, if (now > 0) 0 else 1)
-                    val pos = holder.bindingAdapterPosition
+                    val pos = holder.adapterPosition
                     if (pos >= 0) notifyItemChanged(pos)
                 }
                 holder.menu.visibility = View.VISIBLE
