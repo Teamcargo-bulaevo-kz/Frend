@@ -40,8 +40,27 @@ class MusicActivity : AppCompatActivity() {
     /** Строка списка: трек или группа (настроение, жанр, исполнитель, папка). */
     private data class Row(
         val title: String, val subtitle: String, val track: MusicTrack? = null,
-        val onLong: ((View) -> Unit)? = null, val onClick: () -> Unit
+        val onLong: ((View) -> Unit)? = null, val badge: String? = null, val badgeColor: Int = 0,
+        val tags: String = "", val onClick: () -> Unit
     )
+
+    private val palette = intArrayOf(
+        0xFFFF6B4A.toInt(), 0xFF7C5CFF.toInt(), 0xFF2EC4B6.toInt(), 0xFFF4A261.toInt(),
+        0xFFE76F9A.toInt(), 0xFF4D9DE0.toInt(), 0xFF7FB069.toInt(), 0xFFB5838D.toInt()
+    )
+    private fun colorFor(text: String) = palette[Math.abs(text.hashCode()) % palette.size]
+
+    private val moodEmoji = mapOf(
+        "energetic" to "⚡", "calm" to "🌿", "happy" to "😊", "sad" to "🌧", "romantic" to "💗",
+        "dance" to "💃", "focus" to "🎧", "epic" to "🔥", "dark" to "🖤"
+    )
+    private val genreEmoji = mapOf(
+        "pop" to "🎤", "rock" to "🎸", "hiphop" to "🎙", "electronic" to "🎛", "classical" to "🎻", "jazz" to "🎷",
+        "chanson" to "🎤", "folk" to "🪕", "metal" to "🤘", "rnb" to "💜", "indie" to "🌈", "country" to "🤠",
+        "soundtrack" to "🎬", "reggae" to "🌴", "blues" to "🎺", "other" to "🎵"
+    )
+    private var lastMiniId = -1L
+    private lateinit var miniCover: android.widget.ImageView
 
     private enum class Sort(val label: String) {
         NAME("по названию"), ARTIST("по исполнителю"), NEWEST("сначала новые"), OLDEST("сначала старые"), LIKED("любимые сверху")
@@ -94,6 +113,7 @@ class MusicActivity : AppCompatActivity() {
         miniTitle = findViewById(R.id.miniTitle)
         miniArtist = findViewById(R.id.miniArtist)
         miniPlay = findViewById(R.id.miniPlay)
+        miniCover = findViewById(R.id.miniCover)
 
         sort = Sort.values().firstOrNull { it.name == prefs().getString("sort", null) } ?: Sort.NAME
         status.setOnClickListener {
@@ -112,8 +132,8 @@ class MusicActivity : AppCompatActivity() {
         })
         search.doAfterTextChanged { rebuild() }
 
-        findViewById<TextView>(R.id.shuffleAll).setOnClickListener { shuffleAll() }
-        findViewById<TextView>(R.id.moreButton).setOnClickListener { showMainMenu(it) }
+        findViewById<View>(R.id.shuffleAll).setOnClickListener { shuffleAll() }
+        findViewById<View>(R.id.moreButton).setOnClickListener { showMainMenu(it) }
         findViewById<View>(R.id.miniInfo).setOnClickListener { openPlayer() }
         mini.setOnClickListener { openPlayer() }
         miniPlay.setOnClickListener { MusicService.instance?.togglePlay() }
@@ -327,8 +347,8 @@ class MusicActivity : AppCompatActivity() {
             drill != null -> trackRows(applyQuery(sortTracks(drill), query))
             query.isNotEmpty() -> trackRows(applyQuery(sortTracks(allTracks), query))
             tab == 0 -> trackRows(sortTracks(allTracks))
-            tab == 1 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.takeIf { t -> MusicTags.isTagged(t) }?.mood }, MusicTags.moods, multiMood = true)
-            tab == 2 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.takeIf { t -> MusicTags.isTagged(t) }?.genre }, MusicTags.genres)
+            tab == 1 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.takeIf { t -> MusicTags.isTagged(t) }?.mood }, MusicTags.moods, moodEmoji, multiMood = true)
+            tab == 2 -> groupRows(allTracks.groupBy { MusicTags.get(this, it)?.takeIf { t -> MusicTags.isTagged(t) }?.genre }, MusicTags.genres, genreEmoji)
             tab == 3 -> artistRows()
             tab == 4 -> folderRows()
             else -> reviewRows(review)
@@ -366,53 +386,50 @@ class MusicActivity : AppCompatActivity() {
         }
     }
 
-    private fun tagLine(t: MusicTrack): String {
+    private fun artistLine(t: MusicTrack) = t.artist.ifBlank { "Неизвестный исполнитель" }
+
+    /** Настроение и жанр песни одной строкой, если она размечена. */
+    private fun tagsLine(t: MusicTrack): String {
         val tg = MusicTags.get(this, t)
-        val base = t.artist.ifBlank { "Неизвестный исполнитель" }
-        val mark = when {
-            tg != null && tg.liked > 0 -> "♥ "
-            tg != null && tg.liked < 0 -> "👎 "
-            else -> ""
-        }
-        if (tg == null || !MusicTags.isTagged(tg)) return mark + base
+        if (tg == null || !MusicTags.isTagged(tg)) return ""
         val moods = tg.moods.joinToString(", ") { MusicTags.moodShort[it]?.lowercase() ?: it }
-        return "$mark$base · $moods · ${tg.genreText.lowercase()}"
+        return "$moods · ${tg.genreText.lowercase()}"
     }
 
     private fun trackRows(tracks: List<MusicTrack>): List<Row> =
-        tracks.mapIndexed { i, t -> Row(t.title, tagLine(t), t) { startQueue(tracks, i) } }
+        tracks.mapIndexed { i, t -> Row(t.title, artistLine(t), t, tags = tagsLine(t)) { startQueue(tracks, i) } }
 
-    private fun groupRows(groups: Map<String?, List<MusicTrack>>, names: Map<String, String>, multiMood: Boolean = false): List<Row> {
+    private fun groupRows(groups: Map<String?, List<MusicTrack>>, names: Map<String, String>, emoji: Map<String, String>, multiMood: Boolean = false): List<Row> {
         val result = ArrayList<Row>()
         for ((key, label) in names) {
             val tracks = if (multiMood) {
                 allTracks.filter { t -> MusicTags.get(this, t)?.let { MusicTags.isTagged(it) && key in it.moods } == true }
             } else groups[key] ?: continue
             if (tracks.isEmpty()) continue
-            result.add(Row(label, "${tracks.size} песен") { openGroup(label, tracks) })
+            result.add(Row(label, "${tracks.size} песен", badge = emoji[key] ?: "🎵", badgeColor = colorFor(label)) { openGroup(label, tracks) })
         }
-        groups[null]?.let { result.add(Row("Без разметки", "${it.size} песен") { openGroup("Без разметки", it) }) }
+        groups[null]?.let { result.add(Row("Без разметки", "${it.size} песен", badge = "❔", badgeColor = 0xFF55556A.toInt()) { openGroup("Без разметки", it) }) }
         return result
     }
 
     private fun artistRows(): List<Row> =
         allTracks.groupBy { it.artist.ifBlank { "Неизвестный исполнитель" } }.entries
             .sortedBy { it.key.lowercase() }
-            .map { (name, tracks) -> Row(name, "${tracks.size} песен") { openGroup(name, tracks) } }
+            .map { (name, tracks) -> Row(name, "${tracks.size} песен", badge = name.trim().take(1).uppercase().ifEmpty { "?" }, badgeColor = colorFor(name)) { openGroup(name, tracks) } }
 
     private fun reviewRows(review: List<MusicTrack>): List<Row> = review.map { t ->
         val tg = MusicTags.get(this, t)
         val guess = tg?.let { "${it.moods.joinToString(", ") { m -> MusicTags.moodShort[m]?.lowercase() ?: m }} · ${it.genreText.lowercase()}" }.orEmpty()
-        Row(t.title, "${t.artist.ifBlank { "Неизвестный исполнитель" }} · $guess", t) { openEditor(t, review = true) }
+        Row(t.title, artistLine(t), t, tags = guess) { openEditor(t, review = true) }
     }
 
     private fun folderRows(): List<Row> {
         val lists = PlaylistStore.load(this)
         val result = ArrayList<Row>()
-        result.add(Row("＋ Новая папка", "Для бега, для прогулки, любая своя") { askFolderName("Новая папка", "") { createFolder(it) } })
+        result.add(Row("Новая папка", "Для бега, для прогулки, любая своя", badge = "＋", badgeColor = 0xFFFF6B4A.toInt()) { askFolderName("Новая папка", "") { createFolder(it) } })
         for ((name, tracks) in lists) {
             val resolved = tracks.mapNotNull { p -> allTracks.firstOrNull { it.id == p.id } ?: allTracks.firstOrNull { MusicTags.trackKey(it) == MusicTags.trackKey(p) } }
-            result.add(Row(name, "${resolved.size} песен", onLong = { showFolderMenu(it, name) }) { openGroup(name, resolved, folder = name) })
+            result.add(Row(name, "${resolved.size} песен", onLong = { showFolderMenu(it, name) }, badge = "📁", badgeColor = colorFor(name)) { openGroup(name, resolved, folder = name) })
         }
         return result
     }
@@ -454,11 +471,17 @@ class MusicActivity : AppCompatActivity() {
         val t = PlayerState.track
         if (t == null || !MusicService.isRunning) {
             mini.visibility = View.GONE
+            if (lastMiniId != -1L) { lastMiniId = -1L; adapter.notifyDataSetChanged() }
             return
         }
         mini.visibility = View.VISIBLE
         miniTitle.text = t.title
-        miniArtist.text = t.artist
+        miniArtist.text = t.artist.ifBlank { "Неизвестный исполнитель" }
+        if (t.id != lastMiniId) {
+            lastMiniId = t.id
+            CoverLoader.load(lifecycleScope, this, t, miniCover, 96)
+            adapter.notifyDataSetChanged() // подсветка играющей песни
+        }
         miniPlay.setImageResource(if (PlayerState.playing) R.drawable.ic_pause else R.drawable.ic_play)
         val duration = PlayerState.durationMs
         miniProgress.max = if (duration > 0) duration else 1
@@ -598,9 +621,12 @@ class MusicActivity : AppCompatActivity() {
     private inner class RowAdapter : RecyclerView.Adapter<RowAdapter.Holder>() {
         inner class Holder(v: View) : RecyclerView.ViewHolder(v) {
             val cover: ImageView = v.findViewById(R.id.cover)
+            val badge: TextView = v.findViewById(R.id.badge)
             val title: TextView = v.findViewById(R.id.title)
             val subtitle: TextView = v.findViewById(R.id.subtitle)
-            val menu: TextView = v.findViewById(R.id.menu)
+            val tags: TextView = v.findViewById(R.id.tags)
+            val heart: ImageButton = v.findViewById(R.id.heart)
+            val menu: ImageButton = v.findViewById(R.id.menu)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
@@ -609,23 +635,52 @@ class MusicActivity : AppCompatActivity() {
         override fun getItemCount() = rows.size
 
         override fun onBindViewHolder(holder: Holder, position: Int) {
+            val ctx = this@MusicActivity
             val row = rows[position]
+            val track = row.track
             holder.title.text = row.title
             holder.subtitle.text = row.subtitle
-            holder.itemView.alpha = if (row.track != null && MusicTags.likedOf(this@MusicActivity, row.track) < 0) 0.5f else 1f
+            holder.tags.text = row.tags
+            holder.tags.visibility = if (row.tags.isEmpty()) View.GONE else View.VISIBLE
+            val liked = if (track != null) MusicTags.likedOf(ctx, track) else 0
+            holder.itemView.alpha = if (liked < 0) 0.5f else 1f
+            val playing = track != null && MusicService.isRunning && PlayerState.track?.id == track.id
+            holder.title.setTextColor(ContextCompat.getColor(ctx, if (playing) R.color.music_accent else R.color.music_text))
             holder.itemView.setOnClickListener { row.onClick() }
-            val track = row.track
             if (track != null) {
-                CoverLoader.load(lifecycleScope, this@MusicActivity, track, holder.cover, 96)
+                holder.badge.visibility = View.GONE
+                holder.cover.visibility = View.VISIBLE
+                CoverLoader.load(lifecycleScope, ctx, track, holder.cover, 108)
+                holder.heart.visibility = View.VISIBLE
+                holder.heart.setImageResource(if (liked > 0) R.drawable.ic_heart_filled else R.drawable.ic_heart)
+                holder.heart.imageTintList = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(ctx, if (liked > 0) R.color.music_accent else R.color.music_text_dim)
+                )
+                holder.heart.setOnClickListener {
+                    val now = MusicTags.likedOf(ctx, track)
+                    MusicTags.setLiked(ctx, track, if (now > 0) 0 else 1)
+                    val pos = holder.bindingAdapterPosition
+                    if (pos >= 0) notifyItemChanged(pos)
+                }
                 holder.menu.visibility = View.VISIBLE
                 holder.menu.setOnClickListener { showTrackMenu(it, track) }
                 holder.itemView.setOnLongClickListener { showTrackMenu(holder.menu, track); true }
             } else {
-                holder.cover.setImageResource(R.drawable.cover_placeholder)
-                holder.menu.visibility = View.GONE
+                holder.cover.visibility = View.GONE
+                holder.badge.visibility = View.VISIBLE
+                holder.badge.text = row.badge.orEmpty()
+                holder.badge.setBackgroundResource(R.drawable.badge_bg)
+                holder.badge.background.mutate().setTint(row.badgeColor)
+                holder.heart.visibility = View.GONE
                 val onLong = row.onLong
-                if (onLong != null) holder.itemView.setOnLongClickListener { onLong(holder.itemView); true }
-                else holder.itemView.setOnLongClickListener(null)
+                if (onLong != null) {
+                    holder.menu.visibility = View.VISIBLE
+                    holder.menu.setOnClickListener { onLong(it) }
+                    holder.itemView.setOnLongClickListener { onLong(holder.itemView); true }
+                } else {
+                    holder.menu.visibility = View.GONE
+                    holder.itemView.setOnLongClickListener(null)
+                }
             }
         }
     }

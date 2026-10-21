@@ -1,18 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@color/music_bg" android:gravity="center_horizontal" android:orientation="vertical"
-    android:padding="24dp">
+    android:paddingStart="24dp" android:paddingTop="16dp" android:paddingEnd="24dp" android:paddingBottom="16dp">
 
-    <ImageView
-        android:id="@+id/cover" android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_marginTop="16dp" android:layout_weight="1" android:adjustViewBounds="true"
-        android:scaleType="centerInside" android:src="@drawable/cover_placeholder" />
+    <FrameLayout
+        android:id="@+id/coverBox" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_marginTop="8dp" android:layout_weight="1">
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/cover" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_gravity="center" android:scaleType="centerCrop" android:src="@drawable/cover_placeholder"
+            app:shapeAppearanceOverlay="@style/Round24" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="20dp" android:ellipsize="end" android:gravity="center" android:maxLines="2"
-        android:textColor="@color/music_text" android:textSize="22sp" android:textStyle="bold" />
+        android:layout_marginTop="22dp" android:ellipsize="end" android:gravity="center" android:maxLines="2"
+        android:textColor="@color/music_text" android:textSize="23sp" android:textStyle="bold" />
     <TextView
         android:id="@+id/artist" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="4dp" android:ellipsize="end" android:gravity="center" android:maxLines="1"
@@ -23,9 +28,10 @@
 
     <SeekBar
         android:id="@+id/seek" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="16dp" android:progressTint="@color/music_accent" android:thumbTint="@color/music_accent" />
+        android:layout_marginTop="14dp" android:progressTint="@color/music_accent" android:thumbTint="@color/music_accent" />
     <LinearLayout
-        android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+        android:paddingStart="4dp" android:paddingEnd="4dp">
         <TextView
             android:id="@+id/timeNow" android:layout_width="0dp" android:layout_height="wrap_content"
             android:layout_weight="1" android:textColor="@color/music_text_dim" android:textSize="12sp" />
@@ -39,36 +45,42 @@
         android:gravity="center" android:orientation="horizontal">
         <ImageButton
             android:id="@+id/shuffle" android:layout_width="52dp" android:layout_height="52dp"
-            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Вперемешку" android:src="@drawable/ic_shuffle" />
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Вперемешку"
+            android:padding="14dp" android:scaleType="fitCenter" android:src="@drawable/ic_shuffle" />
         <ImageButton
             android:id="@+id/prev" android:layout_width="60dp" android:layout_height="60dp"
-            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Назад" android:src="@drawable/ic_prev" />
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Назад"
+            android:padding="14dp" android:scaleType="fitCenter" android:src="@drawable/ic_prev" />
         <ImageButton
-            android:id="@+id/play" android:layout_width="72dp" android:layout_height="72dp"
-            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Играть" android:src="@drawable/ic_play" />
+            android:id="@+id/play" android:layout_width="76dp" android:layout_height="76dp"
+            android:layout_marginStart="6dp" android:layout_marginEnd="6dp"
+            android:background="@drawable/play_circle" android:contentDescription="Играть"
+            android:padding="20dp" android:scaleType="fitCenter" android:src="@drawable/ic_play" />
         <ImageButton
             android:id="@+id/next" android:layout_width="60dp" android:layout_height="60dp"
-            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Дальше" android:src="@drawable/ic_next" />
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Дальше"
+            android:padding="14dp" android:scaleType="fitCenter" android:src="@drawable/ic_next" />
         <ImageButton
             android:id="@+id/repeat" android:layout_width="52dp" android:layout_height="52dp"
-            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Повтор" android:src="@drawable/ic_repeat" />
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Повтор"
+            android:padding="14dp" android:scaleType="fitCenter" android:src="@drawable/ic_repeat" />
     </LinearLayout>
 
     <LinearLayout
-        android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"
         android:gravity="center" android:orientation="horizontal">
-        <TextView
-            android:id="@+id/dislikeButton" android:layout_width="64dp" android:layout_height="56dp"
+        <ImageButton
+            android:id="@+id/dislikeButton" android:layout_width="56dp" android:layout_height="56dp"
             android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Не нравится"
-            android:gravity="center" android:text="👎" android:textSize="26sp" />
-        <TextView
-            android:id="@+id/likeButton" android:layout_width="64dp" android:layout_height="56dp"
-            android:layout_marginStart="24dp" android:layout_marginEnd="24dp"
+            android:padding="15dp" android:scaleType="fitCenter" android:src="@drawable/ic_thumb_down" />
+        <ImageButton
+            android:id="@+id/likeButton" android:layout_width="64dp" android:layout_height="64dp"
+            android:layout_marginStart="28dp" android:layout_marginEnd="28dp"
             android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Нравится"
-            android:gravity="center" android:text="♡" android:textColor="@color/music_text" android:textSize="32sp" />
-        <TextView
-            android:id="@+id/moreButton" android:layout_width="64dp" android:layout_height="56dp"
+            android:padding="14dp" android:scaleType="fitCenter" android:src="@drawable/ic_heart" />
+        <ImageButton
+            android:id="@+id/moreButton" android:layout_width="56dp" android:layout_height="56dp"
             android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Ещё"
-            android:gravity="center" android:text="⋮" android:textColor="@color/music_text" android:textSize="28sp" />
+            android:padding="15dp" android:scaleType="fitCenter" android:src="@drawable/ic_more" />
     </LinearLayout>
 </LinearLayout>

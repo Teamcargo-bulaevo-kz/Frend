@@ -62,7 +62,7 @@ class WeatherPromptTest {
     @Test fun promptIsDetailedButCompact() {
         val p = AssistantPrompt.build("20.10.2026 10:00, вторник", "Asia/Oral")
         assertTrue(p, p.contains("20.10.2026") && p.contains("Asia/Oral"))
-        for (word in listOf("СТИЛЬ", "ДЕЙСТВИЯ", "ФАКТЫ", "ПРОВЕРЬ СЕБЯ", "ГРАНИЦЫ", "Булаево")) assertTrue(word, p.contains(word))
+        for (word in listOf("СТИЛЬ", "ДЕЙСТВИЯ", "ФАКТЫ", "ПРОВЕРЬ СЕБЯ", "ГРАНИЦЫ", "Город")) assertTrue(word, p.contains(word))
         assertTrue("слишком длинный: ${p.length}", p.length < 3200)
     }
 }

@@ -34,8 +34,8 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var play: ImageButton
     private lateinit var shuffle: ImageButton
     private lateinit var repeat: ImageButton
-    private lateinit var likeButton: TextView
-    private lateinit var dislikeButton: TextView
+    private lateinit var likeButton: ImageButton
+    private lateinit var dislikeButton: ImageButton
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -58,6 +58,16 @@ class PlayerActivity : AppCompatActivity() {
         shuffle = findViewById(R.id.shuffle)
         repeat = findViewById(R.id.repeat)
 
+        // Обложка квадратная и по центру: размер по меньшей стороне свободного места
+        val coverBox = findViewById<android.view.View>(R.id.coverBox)
+        coverBox.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+            val side = minOf(r - l, b - t)
+            val lp = cover.layoutParams as android.widget.FrameLayout.LayoutParams
+            if (side > 0 && (lp.width != side || lp.height != side)) {
+                lp.width = side; lp.height = side; lp.gravity = android.view.Gravity.CENTER
+                cover.layoutParams = lp
+            }
+        }
         play.setOnClickListener { MusicService.instance?.togglePlay() }
         findViewById<ImageButton>(R.id.next).setOnClickListener { MusicService.instance?.skipNext() }
         findViewById<ImageButton>(R.id.prev).setOnClickListener { MusicService.instance?.skipPrevious() }
@@ -67,7 +77,7 @@ class PlayerActivity : AppCompatActivity() {
         dislikeButton = findViewById(R.id.dislikeButton)
         likeButton.setOnClickListener { rate(1) }
         dislikeButton.setOnClickListener { rate(-1) }
-        findViewById<TextView>(R.id.moreButton).setOnClickListener { showMore(it) }
+        findViewById<ImageButton>(R.id.moreButton).setOnClickListener { showMore(it) }
 
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -136,9 +146,10 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun showRating(liked: Int) {
-        likeButton.text = if (liked > 0) "♥" else "♡"
-        likeButton.setTextColor(getColor(if (liked > 0) R.color.music_accent else R.color.music_text))
-        dislikeButton.alpha = if (liked < 0) 1f else 0.45f
+        likeButton.setImageResource(if (liked > 0) R.drawable.ic_heart_filled else R.drawable.ic_heart)
+        likeButton.imageTintList = android.content.res.ColorStateList.valueOf(getColor(if (liked > 0) R.color.music_accent else R.color.music_text))
+        dislikeButton.imageTintList = android.content.res.ColorStateList.valueOf(getColor(if (liked < 0) R.color.music_accent else R.color.music_text_dim))
+        dislikeButton.alpha = if (liked < 0) 1f else 0.7f
     }
 
     /** Всё остальное спрятано в меню ⋮, чтобы внизу не было лишних кнопок. */
