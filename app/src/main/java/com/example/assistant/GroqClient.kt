@@ -1,6 +1,7 @@
 package com.example.assistant
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -27,18 +28,42 @@ sealed class GroqResult {
     data class FinalText(val text: String) : GroqResult()
 }
 
-class GroqApiException(val code: Int, body: String) : Exception("Groq API error $code: $body")
+/** Ответ сервера с ошибкой. retryAfterSec — сколько сервер просил подождать (заголовок Retry-After или подсказка в тексте). */
+class GroqApiException(val code: Int, body: String, val retryAfterSec: Long? = null) : Exception("Groq API error $code: $body")
 
-class GroqClient(private val apiKey: String, private val appContext: android.content.Context? = null) {
+/** Адрес Worker или токен не заданы при сборке: запросы к модели невозможны. */
+class NotConfiguredException : Exception("Сервер ассистента не настроен (WORKER_URL / APP_TOKEN)")
+
+/**
+ * Клиент модели. Запросы идут не напрямую в Groq, а через Worker (см. папку worker): ключ Groq хранится только там,
+ * приложение подписывается общим токеном X-App-Token.
+ */
+class GroqClient(
+    private val endpoint: String,
+    private val appToken: String,
+    private val appContext: android.content.Context? = null,
+    private val client: OkHttpClient = defaultHttp(),
+    /** Пауза между повторами; в тестах подменяется, чтобы не ждать по-настоящему. */
+    private val pause: suspend (Long) -> Unit = { delay(it) }
+) {
+
+    companion object {
+        const val MAX_RETRIES = 3
+        /** Если сервер просит ждать дольше, не ждём, а сразу сообщаем пользователю. */
+        const val MAX_WAIT_SEC = 30L
+
+        fun defaultHttp(): OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(45, TimeUnit.SECONDS)
+            .build()
+
+        fun create(context: android.content.Context? = null) =
+            GroqClient(BuildConfig.WORKER_URL, BuildConfig.APP_TOKEN, context?.applicationContext)
+    }
 
     private fun promptContext(): PromptContext = appContext?.let { DeviceInfo.promptContext(it) } ?: PromptContext()
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
-        .build()
     private val model = "openai/gpt-oss-120b"
-    private val endpoint = "https://api.groq.com/openai/v1/chat/completions"
 
     /** Короткий системный промпт (экономит токены). Собирается при каждом запросе, чтобы модель знала время. */
     fun systemPrompt(): String {
@@ -144,24 +169,43 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
         throw last ?: IllegalStateException("Модель не вернула текст")
     }
 
-    private fun execute(body: JSONObject): JSONObject {
+    /** Запрос с повторами при лимите (429): до 3 раз, пауза по Retry-After, иначе 2, 4, 8 секунд. */
+    private suspend fun execute(body: JSONObject): JSONObject {
+        if (endpoint.isBlank() || appToken.isBlank()) throw NotConfiguredException()
+        var attempt = 0
+        while (true) {
+            try {
+                return executeOnce(body)
+            } catch (e: GroqApiException) {
+                if (e.code != 429 || attempt >= MAX_RETRIES) throw e
+                val wait = e.retryAfterSec ?: (2L shl attempt)
+                if (wait > MAX_WAIT_SEC) throw e
+                attempt++
+                pause(wait * 1000)
+            }
+        }
+    }
+
+    private fun executeOnce(body: JSONObject): JSONObject {
         val requestBody = body.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url(endpoint)
-            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("X-App-Token", appToken)
             .post(requestBody)
             .build()
 
         client.newCall(request).execute().use { resp ->
             val raw = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                throw GroqApiException(resp.code, raw)
+                val fromHeader = resp.header("Retry-After")?.trim()?.toDoubleOrNull()?.let { Math.ceil(it).toLong() }
+                val fromText = MusicTagger.retryDelayMs(raw)?.let { (it + 999) / 1000 }
+                throw GroqApiException(resp.code, raw, fromHeader ?: fromText)
             }
-            return JSONObject(raw)
+            return try { JSONObject(raw) } catch (e: Exception) { throw GroqApiException(502, "Сервер вернул не JSON") }
         }
     }
 
-    private fun parseResponse(response: JSONObject): GroqResult {
+    internal fun parseResponse(response: JSONObject): GroqResult {
         val choices = response.optJSONArray("choices") ?: JSONArray()
         if (choices.length() == 0) {
             return GroqResult.FinalText("Модель не вернула ответ")
@@ -172,21 +216,18 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
         if (toolCalls != null && toolCalls.length() > 0) {
             val calls = mutableListOf<ToolCall>()
             for (i in 0 until toolCalls.length()) {
-                val call = toolCalls.getJSONObject(i)
-                val function = call.getJSONObject("function")
-                val argsString = function.optString("arguments", "{}")
+                val call = toolCalls.optJSONObject(i) ?: continue
+                val function = call.optJSONObject("function") ?: continue
+                val name = function.optString("name", "")
+                if (name.isBlank()) continue
                 val arguments = try {
-                    JSONObject(argsString.ifBlank { "{}" })
+                    JSONObject(function.optString("arguments", "{}").ifBlank { "{}" })
                 } catch (e: Exception) {
                     JSONObject()
                 }
-                calls += ToolCall(
-                    id = call.getString("id"),
-                    name = function.getString("name"),
-                    arguments = arguments
-                )
+                calls += ToolCall(id = call.optString("id", "").ifBlank { "call_$i" }, name = name, arguments = arguments)
             }
-            return GroqResult.FunctionCalls(calls, message)
+            if (calls.isNotEmpty()) return GroqResult.FunctionCalls(calls, message)
         }
 
         val text = message.optString("content", "")

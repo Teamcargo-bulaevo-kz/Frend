@@ -4,6 +4,11 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 
+/** Значение из переменной окружения или Gradle-свойства, безопасно для вставки в строку BuildConfig. */
+fun secret(name: String): String =
+    (System.getenv(name) ?: (project.findProperty(name) as String?) ?: "")
+        .replace("\\", "\\\\").replace("\"", "\\\"")
+
 android {
     namespace = "com.example.assistant"
     compileSdk = 34
@@ -15,9 +20,11 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-                // Ключ приходит из переменной окружения GROQ_API_KEY
-        // (в GitHub Actions — из Secrets, локально — просто экспортируй её в терминале)
-        buildConfigField("String", "GROQ_API_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")    }
+        // Адрес Worker и общий токен приложения приходят из переменных окружения (в GitHub Actions — из Secrets)
+        // или из -PWORKER_URL=... при локальной сборке. Ключа Groq в приложении нет: он хранится только в Worker.
+        buildConfigField("String", "WORKER_URL", "\"${secret("WORKER_URL")}\"")
+        buildConfigField("String", "APP_TOKEN", "\"${secret("APP_TOKEN")}\"")
+    }
 
     buildTypes {
         release {
@@ -52,4 +59,5 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        repository = AssistantRepository(applicationContext, BuildConfig.GROQ_API_KEY)
+        repository = AssistantRepository(applicationContext)
 
         requestMediaPermissionIfNeeded()
         AssistantService.start(this)

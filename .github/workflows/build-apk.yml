@@ -40,8 +40,15 @@ jobs:
 
       - name: Build debug APK
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
         run: ./gradlew assembleDebug
+
+      - name: Check that no Groq key is inside the APK
+        shell: bash
+        run: |
+          rm -rf /tmp/apk && mkdir /tmp/apk && unzip -q app/build/outputs/apk/debug/app-debug.apk -d /tmp/apk
+          if grep -rqa "gsk_" /tmp/apk; then echo "::error::Groq key (gsk_) found in APK"; exit 1; fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

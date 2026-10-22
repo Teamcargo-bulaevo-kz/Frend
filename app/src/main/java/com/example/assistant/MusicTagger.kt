@@ -165,7 +165,7 @@ object MusicTagger {
     private class Stop(val reason: String) : Exception(reason)
 
     private suspend fun runPhases(context: Context) {
-        val client = GroqClient(BuildConfig.GROQ_API_KEY)
+        val client = GroqClient.create()
         try { MusicCatalog.syncOnStart(context) } catch (e: Exception) { /* нет доступа к папке */ }
         val music = MusicLibrary.index(context, force = true).allMusic()
         try {

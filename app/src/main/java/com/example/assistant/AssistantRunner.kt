@@ -20,7 +20,7 @@ object AssistantRunner {
         ChatHistory.append(app, "user", text, chatId)
         scope.launch {
             val answer = try {
-                AssistantRepository(app, BuildConfig.GROQ_API_KEY).handle(text)
+                AssistantRepository(app).handle(text)
             } catch (e: Exception) {
                 FriendlyError.text(e)
             }

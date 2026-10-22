@@ -64,10 +64,14 @@ class BriefAndErrorTest {
         assertTrue(t, !t.contains("<h1>"))
     }
 
-    @Test fun rateLimitIsFriendly() {
-        val msg = "Groq API error 429: {\"error\":{\"message\":\"Rate limit reached ... tokens per minute (TPM): Limit 8000. Please try again in 12.3825s.\"}}"
-        val t = FriendlyError.fromMessage(msg)
-        assertTrue(t, t.contains("в минуту") && t.contains("13"))
-        assertTrue(FriendlyError.fromMessage("Groq API error 429: tokens per day (TPD) limit").contains("Дневной"))
+    @Test fun errorsAreFriendly() {
+        assertEquals("Лимит запросов, попробуй через 13 с.", FriendlyError.text(GroqApiException(429, "rate", 13)))
+        assertEquals(FriendlyError.RATE_LIMIT, FriendlyError.text(GroqApiException(429, "{\"error\":\"rate_limited\"}")))
+        assertEquals(FriendlyError.DAILY_LIMIT, FriendlyError.text(GroqApiException(429, "tokens per day (TPD) limit")))
+        assertEquals(FriendlyError.UNAUTHORIZED, FriendlyError.text(GroqApiException(401, "{}")))
+        assertEquals(FriendlyError.SERVER, FriendlyError.text(GroqApiException(502, "{}")))
+        assertEquals(FriendlyError.NO_INTERNET, FriendlyError.text(java.net.UnknownHostException("x")))
+        assertEquals(FriendlyError.TIMEOUT, FriendlyError.text(java.net.SocketTimeoutException("x")))
+        assertEquals(FriendlyError.NOT_CONFIGURED, FriendlyError.text(NotConfiguredException()))
     }
 }

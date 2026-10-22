@@ -1,0 +1,13 @@
+name = "jarvis-groq-proxy"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Секреты задаются командами (в файл не писать):
+#   npx wrangler secret put GROQ_API_KEY
+#   npx wrangler secret put APP_TOKEN
+
+# Лимит запросов: 30 в минуту (на IP). Если привязка недоступна, Worker использует запасной счётчик в памяти.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }

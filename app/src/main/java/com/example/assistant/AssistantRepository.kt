@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Связывает модель (GroqClient) с реальными действиями (PhoneActions, MusicActions, NoteActions...).
  * Сначала пробует обойтись без модели (правила и выученные фразы), потом идёт в Groq.
  */
-class AssistantRepository(private val context: Context, apiKey: String) {
+class AssistantRepository(private val context: Context) {
 
     private companion object {
         // Общие для всех экземпляров: сводку одновременно собирает только один
@@ -33,7 +33,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     /** Опасные действия, которые функции запросили подтвердить в ходе этого запроса. */
     private val asks = mutableListOf<PendingAction>()
 
-    private val client = GroqClient(apiKey, context.applicationContext)
+    private val client = GroqClient.create(context)
     private val summaryBatch = 12
     private val patternDao = NoteDatabase.getInstance(context).commandPatternDao()
 
@@ -106,15 +106,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         }
 
         return try {
-            val answer = try {
-                askModel(prompt, normalized)
-            } catch (e: GroqApiException) {
-                // Короткий лимит «в минуту»: подождём и повторим один раз сами
-                val wait = if (e.code == 429) MusicTagger.retryDelayMs(e.message.orEmpty()) else null
-                if (wait == null || wait > 20_000L) throw e
-                kotlinx.coroutines.delay(wait + 500)
-                askModel(prompt, normalized)
-            }
+            // Повторы при лимите (429) делает сам GroqClient
+            val answer = askModel(prompt, normalized)
             answer.also { summarizeInBackground() }
         } catch (e: Exception) {
             FriendlyError.text(e)
