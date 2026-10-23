@@ -168,7 +168,7 @@ class WakeWordService : Service() {
             NotificationChannel(CHANNEL_ID, "Слушаю «" + phraseTitle(this) + "»", NotificationManager.IMPORTANCE_LOW)
         )
         val notification = buildWakeNotification(
-            if (paused) "Слово активации на паузе" else if (diagnosticMode) "Тест микрофона: слушаю" else "Слушаю «Пятница»",
+            if (paused) "Слово активации на паузе" else if (diagnosticMode) "Тест микрофона: слушаю" else "Слушаю «" + phraseTitle(this) + "»",
             if (paused) "Микрофон отключён. Нажми «Продолжить», чтобы возобновить." else if (diagnosticMode) "Скажи любую фразу. Результат появится здесь." else "Ожидаю ключевое слово. Музыка приглушается после активации."
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -388,7 +388,7 @@ class WakeWordService : Service() {
         // Ignore ambient speech while an assistant command is being processed.
         if (processingCommand) return
 
-        val command = WakeWord.commandAfter(text)
+        val command = WakeWord.commandAfter(text, phrase(this))
         if (command != null) {
             acquireAssistantAudioFocus()
             if (command.isNotBlank()) {
