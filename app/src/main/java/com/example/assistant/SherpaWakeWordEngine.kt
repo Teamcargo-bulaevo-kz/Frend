@@ -96,7 +96,7 @@ class SherpaWakeWordEngine(context: Context) {
                 }
                 audio.startRecording()
                 check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
-                onStatus("Микрофон активен. Ожидаю слово «Пятница»…")
+                onStatus("Микрофон активен. Ожидаю слово «" + WakeWordService.phraseTitle(appContext) + "»…")
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var framesSinceLevel = 0
@@ -122,7 +122,13 @@ class SherpaWakeWordEngine(context: Context) {
                     val voice = !soundGateEnabled || rms > maxOf(280.0, noiseFloor * 2.4)
                     if (voice) {
                         if (!speechActive) {
-                            while (preRoll.isNotEmpty()) preRoll.removeFirst().forEach { utteranceSamples.add(it) }
+                            while (preRoll.isNotEmpty()) {
+                                val previous = preRoll.removeFirst()
+                                previous.forEach { utteranceSamples.add(it) }
+                                val previousFloats = FloatArray(previous.size) { previous[it] / 32768.0f }
+                                s.acceptWaveform(previousFloats, SAMPLE_RATE)
+                                while (r.isReady(s)) r.decode(s)
+                            }
                             speechActive = true
                         }
                         hangoverFrames = 8
