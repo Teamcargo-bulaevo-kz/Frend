@@ -41,6 +41,7 @@ class WakeWordService : Service() {
         private const val PREFS = "assistant_prefs"
         private const val KEY = "wake_word"
         private const val KEY_PAUSED = "wake_word_paused"
+        private const val KEY_PHRASE = "wake_phrase"
         private const val COMMAND_WINDOW_MS = 10_000L
         private const val TAG = "WakeWordService"
 
@@ -62,6 +63,25 @@ class WakeWordService : Service() {
          */
         fun pauseForSystemVoiceInput(context: Context) {
             context.stopService(Intent(context, WakeWordService::class.java))
+        }
+
+        /** Текущее слово активации (нижний регистр, без пробелов). */
+        fun phrase(context: Context): String =
+            WakeWord.clean(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PHRASE, null))
+
+        /** Для показа пользователю: «Пятница». */
+        fun phraseTitle(context: Context): String = phrase(context).replaceFirstChar { it.uppercase() }
+
+        /** Читает сохранённое слово и передаёт его распознавателю. Вызывать при запуске приложения и службы. */
+        fun applyPhrase(context: Context) {
+            WakeWord.target = phrase(context)
+        }
+
+        /** Сохраняет новое слово; работающая служба обновит уведомление. */
+        fun setPhrase(context: Context, value: String) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PHRASE, WakeWord.clean(value)).apply()
+            applyPhrase(context)
+            start(context)
         }
 
         fun hasMicPermission(context: Context) =
@@ -108,6 +128,7 @@ class WakeWordService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        applyPhrase(this)
         if (intent?.action == ACTION_STOP) {
             setEnabled(this, false)
             return START_NOT_STICKY
@@ -144,10 +165,10 @@ class WakeWordService : Service() {
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Слушаю «Пятница»", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_ID, "Слово активации", NotificationManager.IMPORTANCE_LOW)
         )
         val notification = buildWakeNotification(
-            if (paused) "«Пятница» на паузе" else if (diagnosticMode) "Тест микрофона: слушаю" else "Слушаю «Пятница»",
+            if (paused) "«${phraseTitle(this)}» на паузе" else if (diagnosticMode) "Тест микрофона: слушаю" else "Слушаю «${phraseTitle(this)}»",
             if (paused) "Микрофон отключён. Нажми «Продолжить», чтобы возобновить." else if (diagnosticMode) "Скажи любую фразу. Результат появится здесь." else "Ожидаю ключевое слово. Музыка приглушается после активации."
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -168,7 +189,7 @@ class WakeWordService : Service() {
                     handler.post {
                         if (!stopped) {
                             manager.notify(NOTIFICATION_ID, buildWakeNotification(
-                                if (paused) "«Пятница» на паузе" else if (diagnosticMode) "Тест фонового микрофона" else "Слушаю «Пятница»",
+                                if (paused) "«${phraseTitle(this)}» на паузе" else if (diagnosticMode) "Тест фонового микрофона" else "Слушаю «${phraseTitle(this)}»",
                                 if (paused) "Микрофон отключён." else message.take(180)
                             ))
                         }
@@ -201,7 +222,7 @@ class WakeWordService : Service() {
                             Log.e(TAG, "Ошибка движка распознавания: $message")
                             manager.notify(
                                 NOTIFICATION_ID,
-                                buildWakeNotification("«Пятница»: ошибка запуска", message.take(180))
+                                buildWakeNotification("«${phraseTitle(this)}»: ошибка запуска", message.take(180))
                             )
                         }
                     }
@@ -310,7 +331,7 @@ class WakeWordService : Service() {
                     if (!stopped) {
                         val normal = Notification.Builder(this, CHANNEL_ID)
                             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                            .setContentTitle("Слушаю «Пятница»")
+                            .setContentTitle("Слушаю «${phraseTitle(this)}»")
                             .setContentText("Распознавание работает. Ожидаю ключевое слово.")
                             .setOngoing(true)
                             .addAction(

@@ -66,7 +66,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle(if (!recognized.isNullOrBlank()) "Тест микрофона: УСПЕХ" else "Тест микрофона: НЕТ РЕЗУЛЬТАТА")
             .setMessage(
-                if (!recognized.isNullOrBlank()) "Система распознала:\n\n«$recognized»\n\nЭто проверяет микрофон и системное распознавание, но не фоновый движок «Пятница»."
+                if (!recognized.isNullOrBlank()) "Система распознала:\n\n«$recognized»\n\nЭто проверяет микрофон и системное распознавание, но не фоновый движок слова активации."
                 else "Система не вернула распознанный текст. Проверь интернет, системный сервис распознавания речи и разрешение микрофона."
             )
             .setPositiveButton("ОК", null)
@@ -78,7 +78,7 @@ class MainActivity : AppCompatActivity() {
         if (granted) {
             WakeWordService.setEnabled(this, true)
         } else {
-            Toast.makeText(this, "Без доступа к микрофону «Пятница» не работает", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Без доступа к микрофону слово активации не работает", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -172,6 +172,11 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.appVersion).text = "V${BuildConfig.VERSION_NAME}"
 
+        WakeWordService.applyPhrase(this)
+        findViewById<TextView>(R.id.wakeSettings).setOnClickListener {
+            drawer.closeDrawers()
+            showWakeSettings()
+        }
         findViewById<TextView>(R.id.voiceSettings).setOnClickListener {
             drawer.closeDrawers()
             showVoiceSettings()
@@ -324,6 +329,36 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { sendPrompt(text) }
             })
         }
+    }
+
+    /** Слово активации и быстрый переход к настройке батареи. */
+    private fun showWakeSettings() {
+        val field = EditText(this).apply {
+            setText(WakeWordService.phraseTitle(this@MainActivity))
+            setSingleLine()
+            setPadding(48, 32, 48, 16)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Слово активации")
+            .setMessage(
+                "Слово, на которое отзывается ассистент (не короче 4 букв). Лучше длинное и необычное: так меньше ложных срабатываний.\n\n" +
+                    "Чтобы слушание не отключалось само, разреши приложению работать без ограничений батареи " +
+                    "(на Xiaomi ещё включи «Автозапуск»)."
+            )
+            .setView(field)
+            .setPositiveButton("Сохранить") { _, _ ->
+                WakeWordService.setPhrase(this, field.text.toString())
+                Toast.makeText(this, "Слово: ${WakeWordService.phraseTitle(this)}", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("Батарея") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
     }
 
     /** Окно выбора голоса и скорости озвучки. */

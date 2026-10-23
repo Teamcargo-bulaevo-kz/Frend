@@ -16,6 +16,8 @@ android {
         targetSdk = 34
         versionCode = 29
         versionName = "1.29"
+        // Только телефонные процессоры: без x86 приложение заметно легче
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         buildConfigField("String", "GROQ_API_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")
     }
 

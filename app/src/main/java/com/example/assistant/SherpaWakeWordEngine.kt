@@ -96,7 +96,7 @@ class SherpaWakeWordEngine(context: Context) {
                 }
                 audio.startRecording()
                 check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
-                onStatus("Микрофон активен. Ожидаю слово «Пятница»…")
+                onStatus("Микрофон активен. Ожидаю слово «${WakeWordService.phraseTitle(appContext)}»…")
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var framesSinceLevel = 0
