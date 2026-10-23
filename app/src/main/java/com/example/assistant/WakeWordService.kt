@@ -41,6 +41,8 @@ class WakeWordService : Service() {
         private const val PREFS = "assistant_prefs"
         private const val KEY = "wake_word"
         private const val KEY_PAUSED = "wake_word_paused"
+        private const val KEY_PHRASE = "wake_phrase"
+        private const val KEY_SOUND_GATE = "wake_sound_gate"
         private const val COMMAND_WINDOW_MS = 10_000L
         private const val TAG = "WakeWordService"
 
@@ -48,12 +50,31 @@ class WakeWordService : Service() {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
 
         fun setEnabled(context: Context, value: Boolean) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putBoolean(KEY, value)
-                .putBoolean(KEY_PAUSED, false)
-                .apply()
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, value).putBoolean(KEY_PAUSED, false).apply()
             if (value) start(context) else context.stopService(Intent(context, WakeWordService::class.java))
         }
+
+        fun phrase(context: Context): String = WakeWord.clean(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PHRASE, WakeWord.DEFAULT))
+
+        fun setPhrase(context: Context, value: String) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PHRASE, WakeWord.clean(value)).apply()
+            restartIfEnabled(context)
+        }
+
+        fun soundGateEnabled(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SOUND_GATE, true)
+
+        fun setSoundGateEnabled(context: Context, value: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SOUND_GATE, value).apply()
+            restartIfEnabled(context)
+        }
+
+        private fun restartIfEnabled(context: Context) {
+            if (!enabled(context)) return
+            context.stopService(Intent(context, WakeWordService::class.java))
+            start(context)
+        }
+
+        fun phraseTitle(context: Context): String = phrase(context).replaceFirstChar { it.uppercase() }
 
         /**
          * Temporarily releases AudioRecord so the system/Google speech recognizer can own the mic.
@@ -164,6 +185,8 @@ class WakeWordService : Service() {
             engine = localEngine
             localEngine.start(
                 onText = { text -> handler.post { if (!stopped) handleText(text) } },
+                onUtterance = { text, samples -> handler.post { if (!stopped && !paused) handleUtterance(text, samples) } },
+                soundGateEnabled = soundGateEnabled(this),
                 onStatus = { message ->
                     handler.post {
                         if (!stopped) {
@@ -179,7 +202,7 @@ class WakeWordService : Service() {
                         if (stopped || paused || text.isBlank()) return@post
                         if (diagnosticMode) updateDiagnosticNotification("Распознаю: ${text.take(150)}")
                         // Give immediate feedback as soon as an interim hypothesis contains the wake word.
-                        if (!diagnosticMode && !listeningCuePlayed && WakeWord.commandAfter(text) != null) {
+                        if (!diagnosticMode && !listeningCuePlayed && WakeWord.commandAfter(text, phrase(this)) != null) {
                             listeningCuePlayed = true
                             acquireAssistantAudioFocus()
                             playCue(listening = true)
@@ -284,6 +307,42 @@ class WakeWordService : Service() {
         }
     }
 
+    /** Final utterance plus PCM audio: use Whisper when online, local recognition as fallback. */
+    private fun handleUtterance(text: String, samples: ShortArray) {
+        if (stopped || paused || text.isBlank() || processingCommand) return
+        if (diagnosticMode) { handleText(text); return }
+        val target = phrase(this)
+        val detectedCommand = WakeWord.commandAfter(text, target)
+        val waitingForCommand = System.currentTimeMillis() < awaitingUntil
+        if (detectedCommand == null && !waitingForCommand) return
+        if (detectedCommand != null && detectedCommand.isBlank() && waitingForCommand) return
+        val fallback = (detectedCommand ?: text).trim()
+        if (detectedCommand != null && detectedCommand.isBlank()) { handleText(text); return }
+        processingCommand = true
+        Thread({
+            val refined = try {
+                if (BuildConfig.GROQ_API_KEY.isBlank() || samples.isEmpty()) fallback
+                else {
+                    val transcript = GroqClient(BuildConfig.GROQ_API_KEY).transcribe(
+                        WavEncoder.encode(samples, 8000),
+                        phraseTitle(this) + ", команды ассистенту на русском языке, названия песен и исполнителей."
+                    )
+                    (WakeWord.commandAfter(transcript, target) ?: transcript).trim().ifBlank { fallback }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Whisper недоступен, использую локальное распознавание", e)
+                fallback
+            }
+            handler.post {
+                if (stopped || paused) { processingCommand = false; return@post }
+                awaitingUntil = 0L
+                listeningCuePlayed = false
+                acquireAssistantAudioFocus()
+                playCue(listening = false)
+                if (refined.isNotBlank()) runCommand(refined) else processingCommand = false
+            }
+        }, "whisper-command").start()
+    }
     private fun handleText(text: String) {
         if (stopped || paused || text.isBlank()) return
         if (diagnosticMode) {
