@@ -71,7 +71,7 @@ class WakeWordService : Service() {
         private fun restartIfEnabled(context: Context) {
             if (!enabled(context)) return
             context.stopService(Intent(context, WakeWordService::class.java))
-            start(context)
+            Handler(Looper.getMainLooper()).postDelayed({ start(context) }, 350L)
         }
 
         fun phraseTitle(context: Context): String = phrase(context).replaceFirstChar { it.uppercase() }
@@ -165,10 +165,10 @@ class WakeWordService : Service() {
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Слушаю «Пятница»", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_ID, "Слушаю «" + phraseTitle(this) + "»", NotificationManager.IMPORTANCE_LOW)
         )
         val notification = buildWakeNotification(
-            if (paused) "«Пятница» на паузе" else if (diagnosticMode) "Тест микрофона: слушаю" else "Слушаю «Пятница»",
+            if (paused) "Слово активации на паузе" else if (diagnosticMode) "Тест микрофона: слушаю" else "Слушаю «Пятница»",
             if (paused) "Микрофон отключён. Нажми «Продолжить», чтобы возобновить." else if (diagnosticMode) "Скажи любую фразу. Результат появится здесь." else "Ожидаю ключевое слово. Музыка приглушается после активации."
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -224,7 +224,7 @@ class WakeWordService : Service() {
                             Log.e(TAG, "Ошибка движка распознавания: $message")
                             manager.notify(
                                 NOTIFICATION_ID,
-                                buildWakeNotification("«Пятница»: ошибка запуска", message.take(180))
+                                buildWakeNotification("Ошибка запуска слова активации", message.take(180))
                             )
                         }
                     }
