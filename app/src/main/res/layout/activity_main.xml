@@ -68,7 +68,7 @@
             android:layout_marginTop="4dp"
             android:layout_marginEnd="12dp"
             android:layout_marginBottom="4dp"
-            android:text="ТЕСТ МИКРОФОНА (без «Пятница»)"
+            android:text="ТЕСТ МИКРОФОНА (без слова активации)"
             app:cornerRadius="10dp" />
 
         <FrameLayout
@@ -251,7 +251,7 @@
             android:paddingTop="8dp"
             android:paddingEnd="16dp"
             android:paddingBottom="16dp"
-            android:text="Слушать «Пятница» (тратит заряд)"
+            android:text="Слушать слово активации"
             android:textColor="@color/chat_text" />
 
         <com.google.android.material.button.MaterialButton
