@@ -12,20 +12,15 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 
 /**
- * Слушает микрофон и откликается на слово «Джарвис»: «Джарвис, включи музыку» выполняется сразу,
- * просто «Джарвис» — ассистент отвечает «Слушаю» и ждёт команду.
- * Работает через системное распознавание речи, поэтому нужен интернет и расходует заряд.
- * Запускается только из открытого приложения (Android не даёт включать микрофон из фона).
+ * Offline Russian speech recognition with Sherpa-ONNX. No Android SpeechRecognizer or Google
+ * speech UI is invoked. First start downloads the Russian model once; later recognition is offline.
  */
 class WakeWordService : Service() {
 
@@ -37,7 +32,8 @@ class WakeWordService : Service() {
         private const val KEY = "wake_word"
         private const val COMMAND_WINDOW_MS = 10_000L
 
-        fun enabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
+        fun enabled(context: Context) =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
 
         fun setEnabled(context: Context, value: Boolean) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, value).apply()
@@ -47,21 +43,21 @@ class WakeWordService : Service() {
         fun hasMicPermission(context: Context) =
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
-        /** Запускает службу, если режим включён и есть разрешение на микрофон. Вызывать из открытого приложения. */
         fun start(context: Context) {
             if (!enabled(context) || !hasMicPermission(context)) return
             try {
                 ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
-            } catch (e: Exception) {
-                // Android не разрешил запуск из фона — запустится при следующем открытии приложения
+            } catch (_: Exception) {
+                // Android may reject a background microphone start; the next foreground app launch retries.
             }
         }
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var recognizer: SpeechRecognizer? = null
+    @Volatile private var engine: SherpaWakeWordEngine? = null
     private var awaitingUntil = 0L
     private var stopped = false
+    private var processingCommand = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -74,20 +70,23 @@ class WakeWordService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Слушаю «Джарвис»", NotificationManager.IMPORTANCE_LOW))
-        val stop = PendingIntent.getService(
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "Слушаю «Джарвис»", NotificationManager.IMPORTANCE_LOW)
+        )
+        val stopIntent = PendingIntent.getService(
             this, 4, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Слушаю «Джарвис»")
-            .setContentText("Скажи «Джарвис» и команду")
+            .setContentText("Локальное распознавание речи; первая загрузка модели может занять время")
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
-                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel), "Выкл", stop
+                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel), "Выкл", stopIntent
                 ).build()
             )
             .build()
@@ -96,95 +95,71 @@ class WakeWordService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        stopped = false
-        listen()
+
+        if (engine == null) {
+            stopped = false
+            val localEngine = SherpaWakeWordEngine(applicationContext)
+            engine = localEngine
+            localEngine.start(
+                onText = { text -> handler.post { if (!stopped) handleText(text) } },
+                onError = { message ->
+                    handler.post {
+                        if (!stopped) {
+                            val n = Notification.Builder(this, CHANNEL_ID)
+                                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                                .setContentTitle("«Джарвис»: ошибка запуска")
+                                .setContentText(message.take(180))
+                                .setOngoing(true)
+                                .addAction(
+                                    Notification.Action.Builder(
+                                        Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                                        "Выкл", stopIntent
+                                    ).build()
+                                ).build()
+                            manager.notify(NOTIFICATION_ID, n)
+                        }
+                    }
+                }
+            )
+        }
         return START_STICKY
     }
 
-    private val listener = object : RecognitionListener {
-        override fun onResults(results: Bundle?) {
-            val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
-            handle(texts)
-        }
+    private fun handleText(text: String) {
+        if (text.isBlank()) return
+        // Ignore ambient speech while an assistant command is being processed.
+        if (processingCommand) return
 
-        override fun onError(error: Int) {
-            when (error) {
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> setEnabled(this@WakeWordService, false)
-                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> restart(600)
-                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> restart(2000)
-                else -> restart(4000)
-            }
-        }
-
-        override fun onReadyForSpeech(params: Bundle?) {}
-        override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
-        override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
-        override fun onPartialResults(partialResults: Bundle?) {}
-        override fun onEvent(eventType: Int, params: Bundle?) {}
-    }
-
-    private fun listen() {
-        if (stopped) return
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            stopSelf()
-            return
-        }
-        // Распознаватель создаём один раз и переиспользуем: пересоздавать его каждые полсекунды тяжело для телефона
-        val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also {
-            it.setRecognitionListener(listener)
-            recognizer = it
-        }
-        r.cancel()
-        r.startListening(
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-            }
-        )
-    }
-
-    private fun restart(delayMs: Long) {
-        if (stopped) return
-        handler.postDelayed({ listen() }, delayMs)
-    }
-
-    private fun handle(texts: List<String>) {
-        if (texts.isEmpty()) return restart(600)
-
-        // «Джарвис, включи музыку» или просто «Джарвис»
-        for (t in texts) {
-            val command = WakeWord.commandAfter(t) ?: continue
-            if (command.isNotBlank()) run(command) else {
+        val command = WakeWord.commandAfter(text)
+        if (command != null) {
+            if (command.isNotBlank()) {
+                runCommand(command)
+            } else {
                 awaitingUntil = System.currentTimeMillis() + COMMAND_WINDOW_MS
                 Speaker.speak(this, "Слушаю")
-                restart(1200)
             }
             return
         }
-        // После «Джарвис» ассистент ждёт команду
+
         if (System.currentTimeMillis() < awaitingUntil) {
-            awaitingUntil = 0
-            return run(texts.first())
+            awaitingUntil = 0L
+            runCommand(text)
         }
-        restart(600)
     }
 
-    private fun run(command: String) {
+    private fun runCommand(command: String) {
+        processingCommand = true
         AssistantRunner.process(this, command) { answer ->
             AssistantService.showResult(applicationContext, command, answer)
-            restart(2500)
+            handler.postDelayed({ processingCommand = false }, 1800)
         }
     }
 
     override fun onDestroy() {
         stopped = true
         handler.removeCallbacksAndMessages(null)
-        recognizer?.destroy()
-        recognizer = null
+        engine?.stop()
+        engine = null
         super.onDestroy()
     }
 }
