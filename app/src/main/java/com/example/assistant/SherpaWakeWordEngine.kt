@@ -30,7 +30,7 @@ class SherpaWakeWordEngine(context: Context) {
     @Volatile private var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
     private val modelDir = File(appContext.filesDir, MODEL_DIR)
 
-    fun start(onText: (String) -> Unit, onError: (String) -> Unit, onStatus: (String) -> Unit = {}) {
+    fun start(onText: (String) -> Unit, onError: (String) -> Unit, onStatus: (String) -> Unit = {}, onPartial: (String) -> Unit = {}, onAudioLevel: (Int) -> Unit = {}) {
         if (!running.compareAndSet(false, true)) return
         Thread({
             try {
@@ -78,18 +78,32 @@ class SherpaWakeWordEngine(context: Context) {
                 check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
                 onStatus("Микрофон активен. Ожидаю слово «Пятница»…")
                 var wakeWordPartialSent = false
+                var lastPartial = ""
+                var framesSinceLevel = 0
                 val pcm = ShortArray(FRAME_SAMPLES)
                 val floats = FloatArray(FRAME_SAMPLES)
 
                 while (running.get()) {
                     val n = audio.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
                     if (n <= 0) continue
+                    framesSinceLevel++
+                    if (framesSinceLevel >= 10) {
+                        var sum = 0L
+                        for (i in 0 until n) sum += kotlin.math.abs(pcm[i].toInt())
+                        val level = if (n > 0) ((sum.toDouble() / n / 32768.0) * 100.0).toInt().coerceIn(0, 100) else 0
+                        onAudioLevel(level)
+                        framesSinceLevel = 0
+                    }
                     for (i in 0 until n) floats[i] = pcm[i] / 32768.0f
                     s.acceptWaveform(if (n == floats.size) floats else floats.copyOf(n), SAMPLE_RATE)
                     while (r.isReady(s)) r.decode(s)
                     // Streaming recognizers can identify the wake word before an endpoint.
                     // Emit a bare wake word immediately; commands are emitted only at endpoint.
                     val partial = r.getResult(s).text.trim()
+                    if (partial.isNotBlank() && partial != lastPartial) {
+                        lastPartial = partial
+                        onPartial(partial)
+                    }
                     if (!wakeWordPartialSent && WakeWord.commandAfter(partial) == "" && partial.isNotBlank()) {
                         wakeWordPartialSent = true
                         onText(partial)
@@ -99,6 +113,7 @@ class SherpaWakeWordEngine(context: Context) {
                         val command = WakeWord.commandAfter(text)
                         if (text.isNotEmpty() && !(wakeWordPartialSent && command == "")) onText(text)
                         wakeWordPartialSent = false
+                        lastPartial = ""
                         r.reset(s)
                     }
                 }
