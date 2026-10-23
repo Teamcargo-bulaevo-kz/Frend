@@ -134,6 +134,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        findViewById<Button>(R.id.wakeWordSettingsButton).setOnClickListener { showWakeWordSettings() }
+
         findViewById<Button>(R.id.testWakeButton).setOnClickListener {
             Toast.makeText(this, "Кнопка нажата: запускаю тест фонового движка", Toast.LENGTH_LONG).show()
             AlertDialog.Builder(this)
@@ -324,6 +326,39 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { sendPrompt(text) }
             })
         }
+    }
+
+    /** Настройка слова активации и экономного режима обработки тишины. */
+    private fun showWakeWordSettings() {
+        val phraseInput = EditText(this).apply {
+            setSingleLine(true)
+            hint = "Например: Пятница или Джарвис"
+            setText(WakeWordService.phrase(this@MainActivity))
+            setSelection(text.length)
+        }
+        val soundGate = android.widget.CheckBox(this).apply {
+            text = "Экономить заряд: распознавать речь при наличии звука"
+            isChecked = WakeWordService.soundGateEnabled(this@MainActivity)
+        }
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            val pad = (20 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+            addView(phraseInput)
+            addView(soundGate)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Фоновое прослушивание")
+            .setMessage("Слово проверяется локально. Команда при наличии интернета уточняется через Whisper на Groq; без сети используется локальное распознавание.")
+            .setView(container)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val phrase = WakeWord.clean(phraseInput.text.toString())
+                WakeWordService.setPhrase(this, phrase)
+                WakeWordService.setSoundGateEnabled(this, soundGate.isChecked)
+                Toast.makeText(this, "Слово активации: " + phrase.replaceFirstChar { it.uppercase() }, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     /** Окно выбора голоса и скорости озвучки. */
