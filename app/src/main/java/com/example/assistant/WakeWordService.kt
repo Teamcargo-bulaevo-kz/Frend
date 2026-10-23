@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 
@@ -31,6 +32,7 @@ class WakeWordService : Service() {
         private const val PREFS = "assistant_prefs"
         private const val KEY = "wake_word"
         private const val COMMAND_WINDOW_MS = 10_000L
+        private const val TAG = "WakeWordService"
 
         fun enabled(context: Context) =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
@@ -47,8 +49,13 @@ class WakeWordService : Service() {
             if (!enabled(context) || !hasMicPermission(context)) return
             try {
                 ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
-            } catch (_: Exception) {
-                // Android may reject a background microphone start; the next foreground app launch retries.
+            } catch (e: Exception) {
+                Log.e(TAG, "Не удалось запустить сервис фонового прослушивания", e)
+                Toast.makeText(
+                    context.applicationContext,
+                    "Не удалось запустить прослушивание: ${e.javaClass.simpleName}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -73,7 +80,7 @@ class WakeWordService : Service() {
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Слушаю «Джарвис»", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_ID, "Слушаю «Пятница»", NotificationManager.IMPORTANCE_LOW)
         )
         val stopIntent = PendingIntent.getService(
             this, 4, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP),
@@ -81,7 +88,7 @@ class WakeWordService : Service() {
         )
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Слушаю «Джарвис»")
+            .setContentTitle("Слушаю «Пятница»")
             .setContentText("Локальное распознавание речи; первая загрузка модели может занять время")
             .setOngoing(true)
             .addAction(
@@ -105,9 +112,12 @@ class WakeWordService : Service() {
                 onError = { message ->
                     handler.post {
                         if (!stopped) {
+                            // Clear the failed engine so a later service start can retry.
+                            engine = null
+                            Log.e(TAG, "Ошибка движка распознавания: $message")
                             val n = Notification.Builder(this, CHANNEL_ID)
                                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                                .setContentTitle("«Джарвис»: ошибка запуска")
+                                .setContentTitle("«Пятница»: ошибка запуска")
                                 .setContentText(message.take(180))
                                 .setOngoing(true)
                                 .addAction(
