@@ -141,7 +141,14 @@ class SherpaWakeWordEngine(context: Context) {
                             val name = File(entry.name).name
                             if (!entry.isDirectory && (name == "model.onnx" || name == "tokens.txt" || name == "LICENSE")) {
                                 val out = File(tempDir, name)
-                                out.outputStream().use { output -> tar.copyTo(output) }
+                                out.outputStream().use { output ->
+                                    val buffer = ByteArray(8192)
+                                    while (true) {
+                                        val count = tar.read(buffer)
+                                        if (count < 0) break
+                                        output.write(buffer, 0, count)
+                                    }
+                                }
                             }
                             entry = tar.nextTarEntry
                         }
