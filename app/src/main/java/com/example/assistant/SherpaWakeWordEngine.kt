@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
@@ -26,6 +28,8 @@ class SherpaWakeWordEngine(context: Context) {
     private val appContext = context.applicationContext
     private val running = AtomicBoolean(false)
     @Volatile private var recorder: AudioRecord? = null
+    @Volatile private var echoCanceler: AcousticEchoCanceler? = null
+    @Volatile private var noiseSuppressor: NoiseSuppressor? = null
     @Volatile private var recognizer: OnlineRecognizer? = null
     @Volatile private var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
     private val modelDir = File(appContext.filesDir, MODEL_DIR)
@@ -66,7 +70,8 @@ class SherpaWakeWordEngine(context: Context) {
                 )
                 check(minBytes > 0) { "Телефон не поддерживает запись аудио 8 кГц" }
                 val audio = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    // VOICE_RECOGNITION asks Android for the speech-oriented input path when available.
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
@@ -74,6 +79,21 @@ class SherpaWakeWordEngine(context: Context) {
                 )
                 check(audio.state == AudioRecord.STATE_INITIALIZED) { "Не удалось открыть микрофон" }
                 recorder = audio
+                // Reduce speaker/music bleed where the phone exposes these effects.
+                try {
+                    if (AcousticEchoCanceler.isAvailable()) {
+                        echoCanceler = AcousticEchoCanceler.create(audio.audioSessionId)?.apply { enabled = true }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Echo cancellation is unavailable", e)
+                }
+                try {
+                    if (NoiseSuppressor.isAvailable()) {
+                        noiseSuppressor = NoiseSuppressor.create(audio.audioSessionId)?.apply { enabled = true }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Noise suppression is unavailable", e)
+                }
                 audio.startRecording()
                 check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
                 onStatus("Микрофон активен. Ожидаю слово «Пятница»…")
@@ -127,6 +147,10 @@ class SherpaWakeWordEngine(context: Context) {
                 try { recorder?.stop() } catch (_: Exception) {}
                 recorder?.release()
                 recorder = null
+                try { echoCanceler?.release() } catch (_: Exception) {}
+                echoCanceler = null
+                try { noiseSuppressor?.release() } catch (_: Exception) {}
+                noiseSuppressor = null
                 stream?.release()
                 stream = null
                 recognizer?.release()
