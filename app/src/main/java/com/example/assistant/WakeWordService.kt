@@ -121,6 +121,7 @@ class WakeWordService : Service() {
     @Volatile private var listeningCuePlayed = false
     @Volatile private var diagnosticMode = false
     @Volatile private var paused = false
+    @Volatile private var commandCancelled = false
     private var cpuWakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -147,6 +148,7 @@ class WakeWordService : Service() {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_PAUSED, false).apply()
             stopped = false
         } else if (intent?.action == ACTION_CANCEL) {
+            commandCancelled = true
             awaitingUntil = 0L
             listeningCuePlayed = false
             processingCommand = false
@@ -318,6 +320,7 @@ class WakeWordService : Service() {
         if (detectedCommand != null && detectedCommand.isBlank() && waitingForCommand) return
         val fallback = (detectedCommand ?: text).trim()
         if (detectedCommand != null && detectedCommand.isBlank()) { handleText(text); return }
+        commandCancelled = false
         processingCommand = true
         Thread({
             val refined = try {
@@ -334,7 +337,7 @@ class WakeWordService : Service() {
                 fallback
             }
             handler.post {
-                if (stopped || paused) { processingCommand = false; return@post }
+                if (commandCancelled || stopped || paused) { processingCommand = false; return@post }
                 awaitingUntil = 0L
                 listeningCuePlayed = false
                 acquireAssistantAudioFocus()
