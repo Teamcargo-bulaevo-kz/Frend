@@ -155,9 +155,12 @@ class MainActivity : AppCompatActivity() {
                 wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             } else {
                 val intent = VoiceInput.intent()
+                // Освобождаем микрофон для системного (Google) распознавания.
+                WakeWordService.pauseForSystemVoiceInput(this)
                 try {
                     diagnosticVoiceLauncher.launch(intent)
                 } catch (e: Exception) {
+                    WakeWordService.start(this)
                     AlertDialog.Builder(this)
                         .setTitle("Не удалось запустить тест")
                         .setMessage("${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}")
@@ -401,12 +404,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchVoiceRecognition() {
-        // Останавливаем озвучку и даём микрофону секунду тишины, иначе он услышит самого ассистента
+        // Останавливаем озвучку и освобождаем микрофон для Google Speech Recognizer.
         Speaker.stop()
+        WakeWordService.pauseForSystemVoiceInput(this)
         val intent = VoiceInput.intent()
         try {
-            micButton.postDelayed({ if (!isFinishing) voiceLauncher.launch(intent) }, VoiceInput.AFTER_SPEECH_DELAY_MS)
+            micButton.postDelayed({
+                if (!isFinishing) {
+                    try {
+                        voiceLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        WakeWordService.start(this)
+                        Toast.makeText(this, "Не удалось запустить системный голосовой ввод", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    WakeWordService.start(this)
+                }
+            }, VoiceInput.AFTER_SPEECH_DELAY_MS)
         } catch (e: Exception) {
+            WakeWordService.start(this)
             Toast.makeText(this, "На телефоне нет приложения для распознавания речи", Toast.LENGTH_SHORT).show()
         }
     }
