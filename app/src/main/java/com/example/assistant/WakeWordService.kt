@@ -46,6 +46,15 @@ class WakeWordService : Service() {
             if (value) start(context) else context.stopService(Intent(context, WakeWordService::class.java))
         }
 
+        /**
+         * Temporarily releases AudioRecord so the system/Google speech recognizer can own the mic.
+         * The user's wake-word preference is intentionally left enabled; MainActivity restarts the
+         * service when the system voice UI closes and the activity returns to the foreground.
+         */
+        fun pauseForSystemVoiceInput(context: Context) {
+            context.stopService(Intent(context, WakeWordService::class.java))
+        }
+
         fun hasMicPermission(context: Context) =
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
