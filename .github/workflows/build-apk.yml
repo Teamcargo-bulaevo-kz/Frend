@@ -21,15 +21,12 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.7
-
       - name: Run unit tests
         id: tests
         continue-on-error: true
         shell: bash
         run: |
-          ./gradlew testDebugUnitTest --console=plain 2>&1 | tee gradle-test.log
+          gradle testDebugUnitTest --console=plain 2>&1 | tee gradle-test.log
           exit ${PIPESTATUS[0]}
 
       - name: Report test problems
@@ -44,7 +41,7 @@ jobs:
       - name: Build debug APK
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
