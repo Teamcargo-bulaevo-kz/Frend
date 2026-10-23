@@ -27,6 +27,7 @@ class WakeWordService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.example.assistant.wake.STOP"
+        const val ACTION_TEST = "com.example.assistant.wake.TEST"
         private const val CHANNEL_ID = "assistant_wake_word"
         private const val NOTIFICATION_ID = 2002
         private const val PREFS = "assistant_prefs"
@@ -47,8 +48,17 @@ class WakeWordService : Service() {
 
         fun start(context: Context) {
             if (!enabled(context) || !hasMicPermission(context)) return
+            startService(context, Intent(context, WakeWordService::class.java))
+        }
+
+        fun test(context: Context) {
+            if (!hasMicPermission(context)) return
+            startService(context, Intent(context, WakeWordService::class.java).setAction(ACTION_TEST))
+        }
+
+        private fun startService(context: Context, intent: Intent) {
             try {
-                ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+                ContextCompat.startForegroundService(context, intent)
             } catch (e: Exception) {
                 Log.e(TAG, "Не удалось запустить сервис фонового прослушивания", e)
                 Toast.makeText(
@@ -65,6 +75,7 @@ class WakeWordService : Service() {
     private var awaitingUntil = 0L
     private var stopped = false
     private var processingCommand = false
+    @Volatile private var diagnosticMode = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -73,6 +84,7 @@ class WakeWordService : Service() {
             setEnabled(this, false)
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_TEST) diagnosticMode = true
         if (!hasMicPermission(this)) {
             stopSelf()
             return START_NOT_STICKY
@@ -88,8 +100,8 @@ class WakeWordService : Service() {
         )
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Слушаю «Пятница»")
-            .setContentText("Локальное распознавание речи; первая загрузка модели может занять время")
+            .setContentTitle(if (diagnosticMode) "Тест микрофона: слушаю" else "Слушаю «Пятница»")
+            .setContentText(if (diagnosticMode) "Скажи любую фразу. Результат появится здесь." else "Локальное распознавание речи; первая загрузка модели может занять время")
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
@@ -137,6 +149,46 @@ class WakeWordService : Service() {
 
     private fun handleText(text: String) {
         if (text.isBlank()) return
+        if (diagnosticMode) {
+            diagnosticMode = false
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val stopIntent = PendingIntent.getService(
+                this, 4, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val result = Notification.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Тест распознавания: УСПЕХ")
+                .setContentText("Телефон услышал: ${text.take(180)}")
+                .setOngoing(enabled(this))
+                .addAction(
+                    Notification.Action.Builder(
+                        Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel), "Выкл", stopIntent
+                    ).build()
+                )
+                .build()
+            manager.notify(NOTIFICATION_ID, result)
+            if (enabled(this)) {
+                handler.postDelayed({
+                    if (!stopped) {
+                        val normal = Notification.Builder(this, CHANNEL_ID)
+                            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                            .setContentTitle("Слушаю «Пятница»")
+                            .setContentText("Распознавание работает. Ожидаю ключевое слово.")
+                            .setOngoing(true)
+                            .addAction(
+                                Notification.Action.Builder(
+                                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel), "Выкл", stopIntent
+                                ).build()
+                            ).build()
+                        manager.notify(NOTIFICATION_ID, normal)
+                    }
+                }, 4000L)
+            } else {
+                handler.postDelayed({ stopSelf() }, 1500L)
+            }
+            return
+        }
         // Ignore ambient speech while an assistant command is being processed.
         if (processingCommand) return
 
