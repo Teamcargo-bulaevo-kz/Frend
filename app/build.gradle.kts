@@ -15,6 +15,9 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // Только телефонные процессоры: без x86 приложение легче на несколько десятков мегабайт
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+
                 // Ключ приходит из переменной окружения GROQ_API_KEY
         // (в GitHub Actions — из Secrets, локально — просто экспортируй её в терминале)
         buildConfigField("String", "GROQ_API_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")    }
@@ -45,6 +48,10 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Офлайн-распознавание слова активации (без Google, без интернета)
+    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

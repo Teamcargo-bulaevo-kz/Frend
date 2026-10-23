@@ -11,20 +11,28 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.media.ToneGenerator
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
 
 /**
- * Слушает микрофон и откликается на слово «Джарвис»: «Джарвис, включи музыку» выполняется сразу,
- * просто «Джарвис» — ассистент отвечает «Слушаю» и ждёт команду.
- * Работает через системное распознавание речи, поэтому нужен интернет и расходует заряд.
+ * Слушает микрофон и откликается на слово активации («Джарвис» по умолчанию, меняется в настройках).
+ *
+ * Как это работает:
+ *  1. Слово ловит офлайн-распознавание Vosk прямо в телефоне: без интернета, без звуков и окон Google.
+ *     В тишине ничего не обрабатывается, поэтому заряд почти не расходуется.
+ *  2. «Джарвис, включи музыку» выполняется сразу. Просто «Джарвис» — тихий сигнал и ждём команду.
+ *  3. Саму команду точнее переводит в текст Whisper на Groq; если интернета нет, берётся текст Vosk.
  * Запускается только из открытого приложения (Android не даёт включать микрофон из фона).
  */
 class WakeWordService : Service() {
@@ -33,15 +41,38 @@ class WakeWordService : Service() {
         const val ACTION_STOP = "com.example.assistant.wake.STOP"
         private const val CHANNEL_ID = "assistant_wake_word"
         private const val NOTIFICATION_ID = 2002
+        private const val PROBLEM_ID = 2003
         private const val PREFS = "assistant_prefs"
         private const val KEY = "wake_word"
-        private const val COMMAND_WINDOW_MS = 10_000L
+        private const val KEY_PHRASE = "wake_phrase"
+
+        private const val RATE = 16000
+        private const val CHUNK = 1600            // 0,1 секунды звука
+        private const val HANG_IDLE = 8           // тишина, после которой фраза считается законченной (0,8 с)
+        private const val HANG_AWAIT = 15         // при ожидании команды терпим паузы подольше (1,5 с)
+        private const val MAX_CHUNKS = 200        // самая длинная фраза — 20 секунд
+        private const val PRE_ROLL = 4            // сколько звука до начала речи сохранять, чтобы не обрезать первое слово
+        private const val AWAIT_MS = 8_000L       // сколько ждать команду после слова активации
+        private const val RESUME_AFTER_MS = 2_500L
+        private const val RESUME_LIMIT_MS = 90_000L
 
         fun enabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
 
         fun setEnabled(context: Context, value: Boolean) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, value).apply()
             if (value) start(context) else context.stopService(Intent(context, WakeWordService::class.java))
+        }
+
+        /** Текущее слово активации (в нижнем регистре, без пробелов). */
+        fun phrase(context: Context): String =
+            WakeWord.clean(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PHRASE, null))
+
+        /** Для показа: «Джарвис». */
+        fun phraseTitle(context: Context): String = phrase(context).replaceFirstChar { it.uppercase() }
+
+        fun setPhrase(context: Context, value: String) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PHRASE, WakeWord.clean(value)).apply()
+            if (enabled(context)) start(context) // служба обновит уведомление
         }
 
         fun hasMicPermission(context: Context) =
@@ -58,10 +89,15 @@ class WakeWordService : Service() {
         }
     }
 
+    private enum class Mode { IDLE, AWAIT }
+
     private val handler = Handler(Looper.getMainLooper())
-    private var recognizer: SpeechRecognizer? = null
-    private var awaitingUntil = 0L
-    private var stopped = false
+    private var worker: Thread? = null
+    @Volatile private var running = false
+    @Volatile private var paused = false
+    @Volatile private var resetRequested = false
+    private var mode = Mode.IDLE
+    private var awaitDeadline = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -75,15 +111,29 @@ class WakeWordService : Service() {
             return START_NOT_STICKY
         }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Слушаю «Джарвис»", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Слово активации", NotificationManager.IMPORTANCE_LOW))
+        val notification = buildNotification("Скажи «${phraseTitle(this)}» и команду")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        if (worker?.isAlive != true) {
+            running = true
+            worker = Thread({ work() }, "wake-word").also { it.start() }
+        }
+        return START_STICKY
+    }
+
+    private fun buildNotification(text: String): Notification {
         val stop = PendingIntent.getService(
             this, 4, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val notification = Notification.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Слушаю «Джарвис»")
-            .setContentText("Скажи «Джарвис» и команду")
+            .setContentTitle("Слушаю «${phraseTitle(this)}»")
+            .setContentText(text)
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
@@ -91,100 +141,199 @@ class WakeWordService : Service() {
                 ).build()
             )
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-        stopped = false
-        listen()
-        return START_STICKY
     }
 
-    private val listener = object : RecognitionListener {
-        override fun onResults(results: Bundle?) {
-            val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
-            handle(texts)
-        }
-
-        override fun onError(error: Int) {
-            when (error) {
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> setEnabled(this@WakeWordService, false)
-                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> restart(600)
-                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> restart(2000)
-                else -> restart(4000)
-            }
-        }
-
-        override fun onReadyForSpeech(params: Bundle?) {}
-        override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
-        override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
-        override fun onPartialResults(partialResults: Bundle?) {}
-        override fun onEvent(eventType: Int, params: Bundle?) {}
+    private fun status(text: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, buildNotification(text))
     }
 
-    private fun listen() {
-        if (stopped) return
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            stopSelf()
-            return
-        }
-        // Распознаватель создаём один раз и переиспользуем: пересоздавать его каждые полсекунды тяжело для телефона
-        val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also {
-            it.setRecognitionListener(listener)
-            recognizer = it
-        }
-        r.cancel()
-        r.startListening(
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-            }
+    /** Показывает причину, по которой слушание выключилось, и выключает его. */
+    private fun problem(text: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(
+            PROBLEM_ID,
+            Notification.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("Слушание выключено")
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
+                .setAutoCancel(true)
+                .build()
         )
+        handler.post { setEnabled(this, false) }
     }
 
-    private fun restart(delayMs: Long) {
-        if (stopped) return
-        handler.postDelayed({ listen() }, delayMs)
-    }
+    // ---------------------------------------------------------------- рабочий поток
 
-    private fun handle(texts: List<String>) {
-        if (texts.isEmpty()) return restart(600)
-
-        // «Джарвис, включи музыку» или просто «Джарвис»
-        for (t in texts) {
-            val command = WakeWord.commandAfter(t) ?: continue
-            if (command.isNotBlank()) run(command) else {
-                awaitingUntil = System.currentTimeMillis() + COMMAND_WINDOW_MS
-                Speaker.speak(this, "Слушаю")
-                restart(1200)
+    private fun work() {
+        var model: Model? = null
+        try {
+            if (!VoskModelStore.ready(this)) {
+                status("Скачиваю модель распознавания… 0%")
+                var shown = -1
+                VoskModelStore.download(this) { p ->
+                    if (p / 5 != shown / 5) {
+                        shown = p
+                        status("Скачиваю модель распознавания… $p%")
+                    }
+                }
             }
+            if (!running) return
+            status("Загружаю модель…")
+            model = Model(VoskModelStore.dir(this).absolutePath)
+            status("Скажи «${phraseTitle(this)}» и команду")
+            listenLoop(model)
+        } catch (e: Throwable) {
+            if (running) {
+                val why = when (e) {
+                    is java.io.IOException -> "Не удалось скачать модель распознавания. Проверь интернет и включи слушание снова."
+                    is UnsatisfiedLinkError -> "Это устройство не поддерживает офлайн-распознавание."
+                    else -> "Ошибка: ${e.message ?: e.javaClass.simpleName}"
+                }
+                problem(why)
+            }
+        } finally {
+            try { model?.close() } catch (_: Throwable) {}
+        }
+    }
+
+    private fun listenLoop(model: Model) {
+        val minBuf = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val record = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE,
+            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+            maxOf(minBuf, CHUNK * 2 * 6)
+        )
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            problem("Не удалось включить микрофон. Возможно, его занимает другое приложение.")
             return
         }
-        // После «Джарвис» ассистент ждёт команду
-        if (System.currentTimeMillis() < awaitingUntil) {
-            awaitingUntil = 0
-            return run(texts.first())
+        val recognizer = Recognizer(model, RATE.toFloat())
+        val buf = ShortArray(CHUNK)
+        val utter = ArrayList<ShortArray>()
+        val pre = ArrayDeque<ShortArray>()
+        var hang = 0
+        var noise = 150.0
+        try {
+            record.startRecording()
+            while (running) {
+                val n = record.read(buf, 0, CHUNK)
+                if (n < 0) throw IllegalStateException("Микрофон перестал отвечать")
+                if (n == 0) continue
+                if (paused) continue
+                if (resetRequested) {
+                    resetRequested = false
+                    recognizer.reset(); utter.clear(); pre.clear(); hang = 0
+                    continue
+                }
+                val data = buf.copyOf(n)
+                val level = WavEncoder.rms(data)
+                val threshold = maxOf(350.0, noise * 2.5)
+                val voice = level > threshold
+                val limit = if (mode == Mode.AWAIT) HANG_AWAIT else HANG_IDLE
+                if (voice) hang = limit
+
+                if (voice || hang > 0) {
+                    if (!voice) hang--
+                    if (utter.isEmpty()) { utter.addAll(pre); pre.clear() }
+                    utter.add(data)
+                    val endpoint = recognizer.acceptWaveForm(data, n)
+                    if (endpoint || utter.size >= MAX_CHUNKS || hang == 0) {
+                        val text = textOf(if (endpoint) recognizer.result else recognizer.finalResult)
+                        val chunks = ArrayList(utter)
+                        utter.clear(); hang = 0
+                        onUtterance(text, chunks, recognizer, record, buf)
+                    }
+                } else {
+                    pre.addLast(data)
+                    while (pre.size > PRE_ROLL) pre.removeFirst()
+                    noise = noise * 0.97 + level * 0.03
+                    if (mode == Mode.AWAIT && System.currentTimeMillis() > awaitDeadline) mode = Mode.IDLE
+                }
+            }
+        } finally {
+            try { record.stop() } catch (_: Throwable) {}
+            record.release()
+            try { recognizer.close() } catch (_: Throwable) {}
         }
-        restart(600)
     }
 
-    private fun run(command: String) {
-        AssistantRunner.process(this, command) { answer ->
-            AssistantService.showResult(applicationContext, command, answer)
-            restart(2500)
+    private fun textOf(json: String): String =
+        try { JSONObject(json).optString("text", "").trim() } catch (e: Exception) { "" }
+
+    /** Закончилась фраза: решаем, что с ней делать. Работает в рабочем потоке. */
+    private fun onUtterance(text: String, chunks: List<ShortArray>, recognizer: Recognizer, record: AudioRecord, buf: ShortArray) {
+        val word = phrase(this)
+        if (mode == Mode.AWAIT) {
+            mode = Mode.IDLE
+            val seconds = chunks.size / 10.0
+            if (text.isBlank() && seconds < 1.0) return // шум, а не команда
+            val command = best(chunks, text, word)
+            if (command.isNotBlank()) dispatch(command)
+            return
+        }
+        val quick = WakeWord.commandAfter(text, word) ?: return
+        if (quick.isBlank()) {
+            // Только слово активации: тихий сигнал и ждём команду
+            beep(record, buf)
+            recognizer.reset()
+            mode = Mode.AWAIT
+            awaitDeadline = System.currentTimeMillis() + AWAIT_MS
+            return
+        }
+        // «Джарвис, включи музыку» одной фразой
+        val command = best(chunks, text, word)
+        dispatch(command.ifBlank { quick })
+    }
+
+    /** Лучший текст команды: Whisper (точнее), а без интернета — текст Vosk. Слово активации отрезается. */
+    private fun best(chunks: List<ShortArray>, voskText: String, word: String): String {
+        val fallback = (WakeWord.commandAfter(voskText, word) ?: voskText).trim()
+        if (BuildConfig.GROQ_API_KEY.isBlank()) return fallback
+        return try {
+            val all = ShortArray(chunks.sumOf { it.size })
+            var pos = 0
+            for (c in chunks) { c.copyInto(all, pos); pos += c.size }
+            val full = GroqClient(BuildConfig.GROQ_API_KEY).transcribe(
+                WavEncoder.encode(all, RATE), "${phraseTitle(this)}, включи музыку."
+            )
+            if (full.isBlank()) fallback else (WakeWord.commandAfter(full, word) ?: full).trim().ifBlank { fallback }
+        } catch (e: Exception) {
+            fallback
+        }
+    }
+
+    /** Короткий сигнал «слушаю». Звук сигнала успевает уйти из буфера микрофона до продолжения. */
+    private fun beep(record: AudioRecord, buf: ShortArray) {
+        try {
+            val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 70)
+            tone.startTone(ToneGenerator.TONE_PROP_ACK, 150)
+            Thread.sleep(260)
+            tone.release()
+        } catch (_: Throwable) {}
+        repeat(5) { record.read(buf, 0, CHUNK) }
+    }
+
+    /** Выполняет команду в главном потоке; микрофон на это время отдыхает, чтобы не слышать ответ ассистента. */
+    private fun dispatch(command: String) {
+        paused = true
+        val resume = Runnable { resetRequested = true; paused = false }
+        handler.postDelayed(resume, RESUME_LIMIT_MS)
+        handler.post {
+            AssistantRunner.process(this, command) { answer ->
+                AssistantService.showResult(applicationContext, command, answer)
+                handler.removeCallbacks(resume)
+                handler.postDelayed(resume, RESUME_AFTER_MS)
+            }
         }
     }
 
     override fun onDestroy() {
-        stopped = true
+        running = false
         handler.removeCallbacksAndMessages(null)
-        recognizer?.destroy()
-        recognizer = null
+        worker = null
         super.onDestroy()
     }
 }

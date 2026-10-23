@@ -62,9 +62,9 @@ class MainActivity : AppCompatActivity() {
     private val wakePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         findViewById<CompoundButton>(R.id.wakeCheck).isChecked = granted
         if (granted) {
-            WakeWordService.setEnabled(this, true)
+            enableWake()
         } else {
-            Toast.makeText(this, "Без микрофона слово «Джарвис» не работает", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Без микрофона слово активации не работает", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -114,12 +114,16 @@ class MainActivity : AppCompatActivity() {
             if (!checked) {
                 WakeWordService.setEnabled(this, false)
             } else if (WakeWordService.hasMicPermission(this)) {
-                WakeWordService.setEnabled(this, true)
+                enableWake()
             } else {
                 wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
 
+        findViewById<TextView>(R.id.wakeSettings).setOnClickListener {
+            drawer.closeDrawers()
+            showWakeSettings()
+        }
         findViewById<TextView>(R.id.voiceSettings).setOnClickListener {
             drawer.closeDrawers()
             showVoiceSettings()
@@ -272,6 +276,49 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { sendPrompt(text) }
             })
         }
+    }
+
+    /** Включает слушание и один раз объясняет, что произойдёт (скачивание модели, батарея). */
+    private fun enableWake() {
+        WakeWordService.setEnabled(this, true)
+        val prefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
+        if (!prefs.getBoolean("wake_tips_seen", false)) {
+            prefs.edit().putBoolean("wake_tips_seen", true).apply()
+            showWakeSettings(firstTime = true)
+        }
+    }
+
+    /** Слово активации, объяснение и быстрый переход к настройке батареи. */
+    private fun showWakeSettings(firstTime: Boolean = false) {
+        val field = EditText(this).apply {
+            setText(WakeWordService.phraseTitle(this@MainActivity))
+            setSingleLine()
+            setPadding(48, 32, 48, 16)
+        }
+        val intro = if (firstTime) {
+            "При первом включении скачается модель распознавания (около 45 МБ), потом интернет для слова не нужен.\n\n"
+        } else ""
+        AlertDialog.Builder(this)
+            .setTitle("Слово активации")
+            .setMessage(
+                intro + "Слово, на которое отзывается ассистент (не короче 4 букв). Лучше длинное и необычное.\n\n" +
+                    "Чтобы слушание не отключалось само, разреши приложению работать без ограничений батареи " +
+                    "(на Xiaomi ещё включи «Автозапуск»)."
+            )
+            .setView(field)
+            .setPositiveButton("Сохранить") { _, _ ->
+                WakeWordService.setPhrase(this, field.text.toString())
+                Toast.makeText(this, "Слово: ${WakeWordService.phraseTitle(this)}", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("Батарея") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
     }
 
     /** Окно выбора голоса и скорости озвучки. */
