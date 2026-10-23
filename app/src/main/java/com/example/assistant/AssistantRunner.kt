@@ -13,21 +13,38 @@ import kotlinx.coroutines.launch
 object AssistantRunner {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    @Volatile private var activeJob: kotlinx.coroutines.Job? = null
 
+    @Synchronized
+    fun cancel() {
+        activeJob?.cancel()
+        activeJob = null
+    }
+
+    @Synchronized
     fun process(context: Context, text: String, onDone: (String) -> Unit) {
+        activeJob?.cancel()
         val app = context.applicationContext
         val chatId = ChatHistory.currentId(app)
         ChatHistory.append(app, "user", text, chatId)
-        scope.launch {
-            val answer = try {
-                AssistantRepository(app, BuildConfig.GROQ_API_KEY).handle(text)
-            } catch (e: Exception) {
-                FriendlyError.text(e)
+        activeJob = scope.launch {
+            try {
+                val answer = try {
+                    AssistantRepository(app, BuildConfig.GROQ_API_KEY).handle(text)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    FriendlyError.text(e)
+                }
+                ChatHistory.append(app, "assistant", answer, chatId)
+                // Голосовая команда вне экрана чата: отвечаем голосом
+                Speaker.speak(app, answer)
+                onDone(answer)
+            } finally {
+                synchronized(this@AssistantRunner) {
+                    if (activeJob === coroutineContext[kotlinx.coroutines.Job]) activeJob = null
+                }
             }
-            ChatHistory.append(app, "assistant", answer, chatId)
-            // Голосовая команда вне экрана чата: отвечаем голосом
-            Speaker.speak(app, answer)
-            onDone(answer)
         }
     }
 }
