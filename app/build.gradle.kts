@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 25
-        versionName = "1.25"
+        versionCode = 26
+        versionName = "1.26"
         buildConfigField("String", "GROQ_API_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")
     }
 
