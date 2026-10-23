@@ -30,16 +30,18 @@ class SherpaWakeWordEngine(context: Context) {
     @Volatile private var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
     private val modelDir = File(appContext.filesDir, MODEL_DIR)
 
-    fun start(onText: (String) -> Unit, onError: (String) -> Unit) {
+    fun start(onText: (String) -> Unit, onError: (String) -> Unit, onStatus: (String) -> Unit = {}) {
         if (!running.compareAndSet(false, true)) return
         Thread({
             try {
-                ensureModel()
+                onStatus("Подготовка русской модели…")
+                ensureModel(onStatus)
                 if (!running.get()) return@Thread
                 val tokens = File(modelDir, "tokens.txt")
                 val model = File(modelDir, "model.onnx")
                 check(model.isFile && tokens.isFile) { "Русская модель Sherpa-ONNX не найдена" }
 
+                onStatus("Модель загружена. Инициализация распознавания…")
                 val r = OnlineRecognizer(
                     config = OnlineRecognizerConfig(
                         featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
@@ -73,6 +75,9 @@ class SherpaWakeWordEngine(context: Context) {
                 check(audio.state == AudioRecord.STATE_INITIALIZED) { "Не удалось открыть микрофон" }
                 recorder = audio
                 audio.startRecording()
+                check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
+                onStatus("Микрофон активен. Ожидаю слово «Пятница»…")
+                var wakeWordPartialSent = false
                 val pcm = ShortArray(FRAME_SAMPLES)
                 val floats = FloatArray(FRAME_SAMPLES)
 
@@ -82,9 +87,18 @@ class SherpaWakeWordEngine(context: Context) {
                     for (i in 0 until n) floats[i] = pcm[i] / 32768.0f
                     s.acceptWaveform(if (n == floats.size) floats else floats.copyOf(n), SAMPLE_RATE)
                     while (r.isReady(s)) r.decode(s)
+                    // Streaming recognizers can identify the wake word before an endpoint.
+                    // Emit a bare wake word immediately; commands are emitted only at endpoint.
+                    val partial = r.getResult(s).text.trim()
+                    if (!wakeWordPartialSent && WakeWord.commandAfter(partial) == "" && partial.isNotBlank()) {
+                        wakeWordPartialSent = true
+                        onText(partial)
+                    }
                     if (r.isEndpoint(s)) {
                         val text = r.getResult(s).text.trim()
-                        if (text.isNotEmpty()) onText(text)
+                        val command = WakeWord.commandAfter(text)
+                        if (text.isNotEmpty() && !(wakeWordPartialSent && command == "")) onText(text)
+                        wakeWordPartialSent = false
                         r.reset(s)
                     }
                 }
@@ -111,12 +125,13 @@ class SherpaWakeWordEngine(context: Context) {
         try { recorder?.stop() } catch (_: Exception) {}
     }
 
-    private fun ensureModel() {
+    private fun ensureModel(onStatus: (String) -> Unit) {
         if (File(modelDir, "model.onnx").isFile && File(modelDir, "tokens.txt").isFile) return
         val archive = File(appContext.cacheDir, "russian-t-one-model.tar.bz2")
         val tempDir = File(appContext.filesDir, "$MODEL_DIR.tmp")
         tempDir.deleteRecursively()
         tempDir.mkdirs()
+        onStatus("Загрузка модели распознавания (около 140 МБ)…")
         val connection = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 60_000
@@ -132,6 +147,7 @@ class SherpaWakeWordEngine(context: Context) {
             connection.disconnect()
         }
 
+        onStatus("Распаковка модели…")
         try {
             BufferedInputStream(archive.inputStream()).use { buffered ->
                 BZip2CompressorInputStream(buffered).use { bz ->
