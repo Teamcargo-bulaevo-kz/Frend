@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
         if (granted) {
             WakeWordService.setEnabled(this, true)
         } else {
-            Toast.makeText(this, "Без микрофона слово «Джарвис» не работает", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Без доступа к микрофону «Пятница» не работает", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -119,6 +119,17 @@ class MainActivity : AppCompatActivity() {
                 wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
+
+        findViewById<Button>(R.id.testWakeButton).setOnClickListener {
+            if (WakeWordService.hasMicPermission(this)) {
+                WakeWordService.test(this)
+                Toast.makeText(this, "Тест запущен. Скажи любую фразу; результат появится в уведомлении.", Toast.LENGTH_LONG).show()
+            } else {
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+
+        findViewById<TextView>(R.id.appVersion).text = "V${BuildConfig.VERSION_NAME}"
 
         findViewById<TextView>(R.id.voiceSettings).setOnClickListener {
             drawer.closeDrawers()
