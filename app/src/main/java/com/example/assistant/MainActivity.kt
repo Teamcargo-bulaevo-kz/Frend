@@ -59,6 +59,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val diagnosticVoiceLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val recognized = if (result.resultCode == RESULT_OK) {
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        } else null
+        AlertDialog.Builder(this)
+            .setTitle(if (!recognized.isNullOrBlank()) "Тест микрофона: УСПЕХ" else "Тест микрофона: НЕТ РЕЗУЛЬТАТА")
+            .setMessage(
+                if (!recognized.isNullOrBlank()) "Система распознала:\n\n«$recognized»\n\nЭто проверяет микрофон и системное распознавание, но не фоновый движок «Пятница»."
+                else "Система не вернула распознанный текст. Проверь интернет, системный сервис распознавания речи и разрешение микрофона."
+            )
+            .setPositiveButton("ОК", null)
+            .show()
+    }
+
     private val wakePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         findViewById<CompoundButton>(R.id.wakeCheck).isChecked = granted
         if (granted) {
@@ -121,11 +135,35 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.testWakeButton).setOnClickListener {
-            if (WakeWordService.hasMicPermission(this)) {
-                WakeWordService.test(this)
-                Toast.makeText(this, "Тест запущен. Скажи любую фразу; результат появится в уведомлении.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Кнопка нажата: запускаю тест фонового движка", Toast.LENGTH_LONG).show()
+            AlertDialog.Builder(this)
+                .setTitle("Проверка фонового движка")
+                .setMessage("Сейчас запускается локальное распознавание Sherpa-ONNX. Первая загрузка модели может занять несколько минут. Если системное уведомление не появится, сервис не стартовал.")
+                .setPositiveButton("Запустить") { _, _ ->
+                    if (WakeWordService.hasMicPermission(this)) {
+                        WakeWordService.test(this)
+                    } else {
+                        wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
+
+        findViewById<Button>(R.id.testSystemSpeechButton).setOnClickListener {
+            if (!WakeWordService.hasMicPermission(this)) {
+                wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             } else {
-                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                val intent = VoiceInput.intent()
+                try {
+                    diagnosticVoiceLauncher.launch(intent)
+                } catch (e: Exception) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Не удалось запустить тест")
+                        .setMessage("${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}")
+                        .setPositiveButton("ОК", null)
+                        .show()
+                }
             }
         }
 
