@@ -34,7 +34,7 @@ class SherpaWakeWordEngine(context: Context) {
     @Volatile private var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
     private val modelDir = File(appContext.filesDir, MODEL_DIR)
 
-    fun start(onText: (String) -> Unit, onError: (String) -> Unit, onStatus: (String) -> Unit = {}, onPartial: (String) -> Unit = {}, onAudioLevel: (Int) -> Unit = {}) {
+    fun start(onText: (String) -> Unit, onError: (String) -> Unit, onStatus: (String) -> Unit = {}, onPartial: (String) -> Unit = {}, onAudioLevel: (Int) -> Unit = {}, onUtterance: ((String, ShortArray) -> Unit)? = null, soundGateEnabled: Boolean = true) {
         if (!running.compareAndSet(false, true)) return
         Thread({
             try {
@@ -100,40 +100,69 @@ class SherpaWakeWordEngine(context: Context) {
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var framesSinceLevel = 0
+                var speechActive = false
+                var hangoverFrames = 0
+                var noiseFloor = 120.0
+                val preRoll = ArrayDeque<ShortArray>()
+                val utteranceSamples = ArrayList<Short>(SAMPLE_RATE * 20)
                 val pcm = ShortArray(FRAME_SAMPLES)
                 val floats = FloatArray(FRAME_SAMPLES)
+                val targetPhrase = WakeWordService.phrase(appContext)
 
                 while (running.get()) {
                     val n = audio.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
                     if (n <= 0) continue
                     framesSinceLevel++
                     if (framesSinceLevel >= 10) {
-                        var sum = 0L
-                        for (i in 0 until n) sum += kotlin.math.abs(pcm[i].toInt())
-                        val level = if (n > 0) ((sum.toDouble() / n / 32768.0) * 100.0).toInt().coerceIn(0, 100) else 0
+                        val level = ((WavEncoder.rms(pcm, n) / 32768.0) * 100.0).toInt().coerceIn(0, 100)
                         onAudioLevel(level)
                         framesSinceLevel = 0
                     }
-                    for (i in 0 until n) floats[i] = pcm[i] / 32768.0f
+                    val rms = WavEncoder.rms(pcm, n)
+                    val voice = !soundGateEnabled || rms > maxOf(280.0, noiseFloor * 2.4)
+                    if (voice) {
+                        if (!speechActive) {
+                            while (preRoll.isNotEmpty()) preRoll.removeFirst().forEach { utteranceSamples.add(it) }
+                            speechActive = true
+                        }
+                        hangoverFrames = 8
+                    } else if (speechActive && hangoverFrames > 0) {
+                        hangoverFrames--
+                    } else {
+                        preRoll.addLast(pcm.copyOf(n))
+                        while (preRoll.size > 3) preRoll.removeFirst()
+                        noiseFloor = noiseFloor * 0.97 + rms * 0.03
+                        continue
+                    }
+                    for (i in 0 until n) {
+                        floats[i] = pcm[i] / 32768.0f
+                        utteranceSamples.add(pcm[i])
+                    }
+                    if (utteranceSamples.size > SAMPLE_RATE * 25) {
+                        utteranceSamples.subList(0, utteranceSamples.size - SAMPLE_RATE * 25).clear()
+                    }
                     s.acceptWaveform(if (n == floats.size) floats else floats.copyOf(n), SAMPLE_RATE)
                     while (r.isReady(s)) r.decode(s)
-                    // Streaming recognizers can identify the wake word before an endpoint.
-                    // Emit a bare wake word immediately; commands are emitted only at endpoint.
                     val partial = r.getResult(s).text.trim()
-                    if (partial.isNotBlank() && partial != lastPartial) {
-                        lastPartial = partial
-                        onPartial(partial)
-                    }
-                    if (!wakeWordPartialSent && WakeWord.commandAfter(partial) == "" && partial.isNotBlank()) {
+                    if (partial.isNotBlank() && partial != lastPartial) { lastPartial = partial; onPartial(partial) }
+                    if (!wakeWordPartialSent && WakeWord.commandAfter(partial, targetPhrase) == "" && partial.isNotBlank()) {
                         wakeWordPartialSent = true
                         onText(partial)
                     }
-                    if (r.isEndpoint(s)) {
+                    val endpoint = r.isEndpoint(s) || (soundGateEnabled && speechActive && hangoverFrames == 0)
+                    if (endpoint) {
                         val text = r.getResult(s).text.trim()
-                        val command = WakeWord.commandAfter(text)
-                        if (text.isNotEmpty() && !(wakeWordPartialSent && command == "")) onText(text)
+                        val samples = ShortArray(utteranceSamples.size) { utteranceSamples[it] }
+                        if (text.isNotEmpty()) {
+                            if (onUtterance != null) onUtterance(text, samples)
+                            else if (!(wakeWordPartialSent && WakeWord.commandAfter(text, targetPhrase) == "")) onText(text)
+                        }
                         wakeWordPartialSent = false
                         lastPartial = ""
+                        utteranceSamples.clear()
+                        preRoll.clear()
+                        speechActive = false
+                        hangoverFrames = 0
                         r.reset(s)
                     }
                 }
