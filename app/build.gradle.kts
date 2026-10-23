@@ -1,3 +1,5 @@
+import java.net.URL
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -38,7 +40,7 @@ tasks.register("downloadSherpaAar") {
         if (!target.exists() || target.length() < 1_000_000L) {
             target.parentFile.mkdirs()
             val temp = target.resolveSibling(target.name + ".part")
-            java.net.URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar").openStream().use { input ->
+            URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar").openStream().use { input ->
                 temp.outputStream().use { output -> input.copyTo(output) }
             }
             check(temp.length() > 1_000_000L) { "Sherpa-ONNX AAR download failed or was incomplete" }
