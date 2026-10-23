@@ -144,6 +144,31 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
         throw last ?: IllegalStateException("Модель не вернула текст")
     }
 
+
+    /**
+     * Распознаёт WAV через Whisper на Groq. Вызывается из фонового потока.
+     * Подсказка помогает корректно распознать названия и слово активации.
+     */
+    fun transcribe(wav: ByteArray, hint: String? = null): String {
+        val form = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("file", "voice.wav", wav.toRequestBody("audio/wav".toMediaType()))
+            .addFormDataPart("model", "whisper-large-v3-turbo")
+            .addFormDataPart("language", "ru")
+            .addFormDataPart("temperature", "0")
+            .addFormDataPart("response_format", "json")
+        if (!hint.isNullOrBlank()) form.addFormDataPart("prompt", hint)
+        val request = Request.Builder()
+            .url("https://api.groq.com/openai/v1/audio/transcriptions")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .post(form.build())
+            .build()
+        client.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw GroqApiException(response.code, raw)
+            return JSONObject(raw).optString("text", "").trim()
+        }
+    }
+
     private fun execute(body: JSONObject): JSONObject {
         val requestBody = body.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
