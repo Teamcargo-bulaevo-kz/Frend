@@ -199,18 +199,10 @@ class WakeWordService : Service() {
                             // Clear the failed engine so a later service start can retry.
                             engine = null
                             Log.e(TAG, "Ошибка движка распознавания: $message")
-                            val n = Notification.Builder(this, CHANNEL_ID)
-                                .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                                .setContentTitle("«Пятница»: ошибка запуска")
-                                .setContentText(message.take(180))
-                                .setOngoing(true)
-                                .addAction(
-                                    Notification.Action.Builder(
-                                        Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                                        "Выкл", stopIntent
-                                    ).build()
-                                ).build()
-                            manager.notify(NOTIFICATION_ID, n)
+                            manager.notify(
+                                NOTIFICATION_ID,
+                                buildWakeNotification("«Пятница»: ошибка запуска", message.take(180))
+                            )
                         }
                     }
                 }
