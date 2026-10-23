@@ -122,6 +122,7 @@ class MainActivity : AppCompatActivity() {
         speakCheck.setOnCheckedChangeListener { _, checked -> Speaker.setEnabled(this, checked) }
 
         val wakeCheck = findViewById<CompoundButton>(R.id.wakeCheck)
+        wakeCheck.text = "Слушать «" + WakeWordService.phraseTitle(this) + "» (экономия заряда)"
         wakeCheck.isChecked = WakeWordService.enabled(this) && WakeWordService.hasMicPermission(this)
         wakeCheck.setOnCheckedChangeListener { button, checked ->
             if (!button.isPressed) return@setOnCheckedChangeListener
@@ -355,6 +356,7 @@ class MainActivity : AppCompatActivity() {
                 val phrase = WakeWord.clean(phraseInput.text.toString())
                 WakeWordService.setPhrase(this, phrase)
                 WakeWordService.setSoundGateEnabled(this, soundGate.isChecked)
+                findViewById<CompoundButton>(R.id.wakeCheck).text = "Слушать «" + WakeWordService.phraseTitle(this) + "» (экономия заряда)"
                 Toast.makeText(this, "Слово активации: " + phrase.replaceFirstChar { it.uppercase() }, Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Отмена", null)
