@@ -230,7 +230,7 @@
             android:paddingTop="8dp"
             android:paddingEnd="16dp"
             android:paddingBottom="16dp"
-            android:text="Слушать «Джарвис» (тратит заряд)"
+            android:text="Слушать «Пятница» (тратит заряд)"
             android:textColor="@color/chat_text" />
     </LinearLayout>
 </androidx.drawerlayout.widget.DrawerLayout>
