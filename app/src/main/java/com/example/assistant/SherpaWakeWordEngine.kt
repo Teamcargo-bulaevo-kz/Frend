@@ -202,61 +202,21 @@ class SherpaWakeWordEngine(context: Context) {
     private fun ensureModel(onStatus: (String) -> Unit) {
         if (File(modelDir, "model.onnx").isFile && File(modelDir, "tokens.txt").isFile) return
         val archive = File(appContext.cacheDir, "russian-t-one-model.tar.bz2")
-        val partial = File(appContext.cacheDir, "russian-t-one-model.tar.bz2.part")
-        val tempDir = File(appContext.filesDir, "\$MODEL_DIR.tmp")
+        val tempDir = File(appContext.filesDir, "$MODEL_DIR.tmp")
         tempDir.deleteRecursively()
         tempDir.mkdirs()
-
-        // Preserve incomplete downloads and continue them with HTTP Range on the next attempt.
-        var offset = partial.takeIf { it.isFile }?.length() ?: 0L
-        onStatus(if (offset > 0L) "Продолжаю загрузку модели: \${offset / (1024 * 1024)} МБ уже загружено…" else "Загрузка модели распознавания (около 140 МБ)…")
+        onStatus("Загрузка модели распознавания (около 140 МБ)…")
         val connection = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 60_000
             instanceFollowRedirects = true
-            if (offset > 0L) setRequestProperty("Range", "bytes=\$offset-")
         }
         try {
             connection.connect()
-            val responseCode = connection.responseCode
-            // A server that ignores Range must not append a full response to the partial file.
-            if (offset > 0L && responseCode != HttpURLConnection.HTTP_PARTIAL) {
-                partial.delete()
-                offset = 0L
+            check(connection.responseCode in 200..299) { "Не удалось скачать русскую модель (HTTP ${connection.responseCode})" }
+            connection.inputStream.use { input ->
+                archive.outputStream().use { output -> input.copyTo(output) }
             }
-            check(connection.responseCode in 200..299) { "Не удалось скачать русскую модель (HTTP \${connection.responseCode})" }
-            val totalFromRange = connection.getHeaderField("Content-Range")?.substringAfterLast("/")?.toLongOrNull()
-            val contentLength = connection.contentLengthLong
-            val expectedTotal = totalFromRange ?: if (contentLength > 0L) contentLength + offset else -1L
-            val append = offset > 0L && responseCode == HttpURLConnection.HTTP_PARTIAL
-            java.io.FileOutputStream(partial, append).use { output ->
-                connection.inputStream.use { input ->
-                    val buffer = ByteArray(64 * 1024)
-                    var downloaded = if (append) offset else 0L
-                    var lastReported = downloaded
-                    var lastUpdate = System.currentTimeMillis()
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        downloaded += count
-                        val now = System.currentTimeMillis()
-                        if (downloaded - lastReported >= 2L * 1024 * 1024 || now - lastUpdate >= 1000L) {
-                            val percent = if (expectedTotal > 0L) " (\${(downloaded * 100 / expectedTotal).coerceIn(0, 100)}%)" else ""
-                            onStatus("Загрузка модели: \${downloaded / (1024 * 1024)} МБ\$percent")
-                            lastReported = downloaded
-                            lastUpdate = now
-                        }
-                    }
-                }
-            }
-            check(partial.length() > 10_000_000L) { "Загрузка модели неполная. Повтори запуск — докачка продолжится." }
-            if (archive.exists()) archive.delete()
-            check(partial.renameTo(archive) || run {
-                partial.copyTo(archive, overwrite = true)
-                partial.delete()
-                true
-            }) { "Не удалось подготовить архив модели" }
         } finally {
             connection.disconnect()
         }
@@ -290,11 +250,7 @@ class SherpaWakeWordEngine(context: Context) {
             modelDir.deleteRecursively()
             check(tempDir.renameTo(modelDir)) { "Не удалось сохранить файлы модели" }
         } finally {
-            // Keep the partial archive when download/extraction fails so the next launch can resume.
-            if (File(modelDir, "model.onnx").isFile && File(modelDir, "tokens.txt").isFile) {
-                archive.delete()
-                partial.delete()
-            }
+            archive.delete()
             tempDir.deleteRecursively()
         }
     }
