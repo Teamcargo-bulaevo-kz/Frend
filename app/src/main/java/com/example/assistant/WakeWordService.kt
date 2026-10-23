@@ -142,6 +142,20 @@ class WakeWordService : Service() {
                         }
                     }
                 },
+                onPartial = { text ->
+                    handler.post {
+                        if (!stopped && diagnosticMode && text.isNotBlank()) {
+                            updateDiagnosticNotification("Распознаю: ${text.take(150)}")
+                        }
+                    }
+                },
+                onAudioLevel = { level ->
+                    handler.post {
+                        if (!stopped && diagnosticMode) {
+                            updateDiagnosticNotification("Микрофон получает звук: $level%")
+                        }
+                    }
+                },
                 onError = { message ->
                     handler.post {
                         if (!stopped) {
@@ -179,6 +193,27 @@ class WakeWordService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "Не удалось удерживать CPU для фонового распознавания", e)
         }
+    }
+
+    private fun updateDiagnosticNotification(message: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val stopIntent = PendingIntent.getService(
+            this, 4, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentTitle("Тест фонового микрофона")
+            .setContentText(message.take(180))
+            .setOngoing(true)
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                    "Выкл", stopIntent
+                ).build()
+            )
+            .build()
+        manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun handleText(text: String) {
