@@ -191,7 +191,7 @@ class WakeWordService : Service() {
                     handler.post {
                         if (!stopped) {
                             manager.notify(NOTIFICATION_ID, buildWakeNotification(
-                                if (paused) "«Пятница» на паузе" else if (diagnosticMode) "Тест фонового микрофона" else "Слушаю «Пятница»",
+                                if (paused) "Слово активации на паузе" else if (diagnosticMode) "Тест фонового микрофона" else "Слушаю «" + phraseTitle(this) + "»",
                                 if (paused) "Микрофон отключён." else message.take(180)
                             ))
                         }
@@ -369,7 +369,7 @@ class WakeWordService : Service() {
                     if (!stopped) {
                         val normal = Notification.Builder(this, CHANNEL_ID)
                             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                            .setContentTitle("Слушаю «Пятница»")
+                            .setContentTitle("Слушаю «" + phraseTitle(this) + "»")
                             .setContentText("Распознавание работает. Ожидаю ключевое слово.")
                             .setOngoing(true)
                             .addAction(
