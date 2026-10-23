@@ -278,8 +278,8 @@ class WakeWordService : Service() {
                 handler.postDelayed({ if (!stopped) runCommand(command) }, 180L)
             } else {
                 awaitingUntil = System.currentTimeMillis() + COMMAND_WINDOW_MS
+                if (!listeningCuePlayed) playCue(listening = true)
                 listeningCuePlayed = true
-                playCue(listening = true)
                 Speaker.speak(this, "Слушаю")
             }
             return
