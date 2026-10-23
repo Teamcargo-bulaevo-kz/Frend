@@ -119,6 +119,7 @@ class WakeWordService : Service() {
             listeningCuePlayed = false
             engine?.stop()
             engine = null
+            try { if (cpuWakeLock?.isHeld == true) cpuWakeLock?.release() } catch (_: Exception) {}
             abandonAssistantAudioFocus()
         } else if (intent?.action == ACTION_RESUME) {
             paused = false
@@ -175,7 +176,7 @@ class WakeWordService : Service() {
                 },
                 onPartial = { text ->
                     handler.post {
-                        if (stopped || text.isBlank()) return@post
+                        if (stopped || paused || text.isBlank()) return@post
                         if (diagnosticMode) updateDiagnosticNotification("Распознаю: ${text.take(150)}")
                         // Give immediate feedback as soon as an interim hypothesis contains the wake word.
                         if (!diagnosticMode && !listeningCuePlayed && WakeWord.commandAfter(text) != null) {
@@ -292,7 +293,7 @@ class WakeWordService : Service() {
     }
 
     private fun handleText(text: String) {
-        if (text.isBlank()) return
+        if (stopped || paused || text.isBlank()) return
         if (diagnosticMode) {
             diagnosticMode = false
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
