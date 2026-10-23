@@ -7,6 +7,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -76,6 +78,7 @@ class WakeWordService : Service() {
     private var awaitingUntil = 0L
     private var stopped = false
     private var processingCommand = false
+    @Volatile private var listeningCuePlayed = false
     @Volatile private var diagnosticMode = false
     private var cpuWakeLock: PowerManager.WakeLock? = null
 
@@ -144,8 +147,12 @@ class WakeWordService : Service() {
                 },
                 onPartial = { text ->
                     handler.post {
-                        if (!stopped && diagnosticMode && text.isNotBlank()) {
-                            updateDiagnosticNotification("Распознаю: ${text.take(150)}")
+                        if (stopped || text.isBlank()) return@post
+                        if (diagnosticMode) updateDiagnosticNotification("Распознаю: ${text.take(150)}")
+                        // Give immediate feedback as soon as an interim hypothesis contains the wake word.
+                        if (!diagnosticMode && !listeningCuePlayed && WakeWord.commandAfter(text) != null) {
+                            listeningCuePlayed = true
+                            playCue(listening = true)
                         }
                     }
                 },
@@ -264,9 +271,15 @@ class WakeWordService : Service() {
         val command = WakeWord.commandAfter(text)
         if (command != null) {
             if (command.isNotBlank()) {
-                runCommand(command)
+                // If interim recognition did not catch the keyword, still confirm before acting.
+                if (!listeningCuePlayed) playCue(listening = true)
+                listeningCuePlayed = false
+                playCue(listening = false)
+                handler.postDelayed({ if (!stopped) runCommand(command) }, 180L)
             } else {
                 awaitingUntil = System.currentTimeMillis() + COMMAND_WINDOW_MS
+                listeningCuePlayed = true
+                playCue(listening = true)
                 Speaker.speak(this, "Слушаю")
             }
             return
@@ -274,7 +287,24 @@ class WakeWordService : Service() {
 
         if (System.currentTimeMillis() < awaitingUntil) {
             awaitingUntil = 0L
-            runCommand(text)
+            listeningCuePlayed = false
+            playCue(listening = false)
+            handler.postDelayed({ if (!stopped) runCommand(text) }, 180L)
+        }
+    }
+
+    /**
+     * Short audible acknowledgement. A high ToneGenerator volume makes it clearer than
+     * relying on TTS alone; actual loudness still follows the phone's media volume.
+     */
+    private fun playCue(listening: Boolean) {
+        try {
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+            val type = if (listening) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_PROMPT
+            tone.startTone(type, if (listening) 180 else 260)
+            handler.postDelayed({ try { tone.release() } catch (_: Exception) {} }, 450L)
+        } catch (e: Exception) {
+            Log.w(TAG, "Не удалось проиграть звуковой сигнал", e)
         }
     }
 
