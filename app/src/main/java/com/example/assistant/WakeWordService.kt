@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.content.ContextCompat
@@ -76,6 +77,7 @@ class WakeWordService : Service() {
     private var stopped = false
     private var processingCommand = false
     @Volatile private var diagnosticMode = false
+    private var cpuWakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -117,10 +119,29 @@ class WakeWordService : Service() {
 
         if (engine == null) {
             stopped = false
+            acquireCpuWakeLock()
             val localEngine = SherpaWakeWordEngine(applicationContext)
             engine = localEngine
             localEngine.start(
                 onText = { text -> handler.post { if (!stopped) handleText(text) } },
+                onStatus = { message ->
+                    handler.post {
+                        if (!stopped) {
+                            val statusNotification = Notification.Builder(this, CHANNEL_ID)
+                                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                                .setContentTitle(if (diagnosticMode) "Тест фонового микрофона" else "Слушаю «Пятница»")
+                                .setContentText(message.take(180))
+                                .setOngoing(true)
+                                .addAction(
+                                    Notification.Action.Builder(
+                                        Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                                        "Выкл", stopIntent
+                                    ).build()
+                                ).build()
+                            manager.notify(NOTIFICATION_ID, statusNotification)
+                        }
+                    }
+                },
                 onError = { message ->
                     handler.post {
                         if (!stopped) {
@@ -145,6 +166,19 @@ class WakeWordService : Service() {
             )
         }
         return START_STICKY
+    }
+
+    private fun acquireCpuWakeLock() {
+        try {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (cpuWakeLock == null) {
+                cpuWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:WakeWord")
+                    .apply { setReferenceCounted(false) }
+            }
+            if (cpuWakeLock?.isHeld != true) cpuWakeLock?.acquire()
+        } catch (e: Exception) {
+            Log.w(TAG, "Не удалось удерживать CPU для фонового распознавания", e)
+        }
     }
 
     private fun handleText(text: String) {
@@ -222,6 +256,8 @@ class WakeWordService : Service() {
         handler.removeCallbacksAndMessages(null)
         engine?.stop()
         engine = null
+        try { if (cpuWakeLock?.isHeld == true) cpuWakeLock?.release() } catch (_: Exception) {}
+        cpuWakeLock = null
         super.onDestroy()
     }
 }
