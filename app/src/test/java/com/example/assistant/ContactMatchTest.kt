@@ -36,11 +36,12 @@ class ContactMatchTest {
     }
 
     @Test fun wakeWord() {
-        assertTrue(WakeWord.isWakeWord("Джарвис"))
-        assertTrue(WakeWord.isWakeWord("жарвис"))
+        assertTrue(WakeWord.isWakeWord("Пятница"))
+        assertTrue(WakeWord.isWakeWord("Пятнице"))
+        assertTrue(WakeWord.isWakeWord("пятнит"))
         assertFalse(WakeWord.isWakeWord("включи"))
-        org.junit.Assert.assertEquals("включи музыку", WakeWord.commandAfter("Джарвис, включи музыку"))
-        org.junit.Assert.assertEquals("", WakeWord.commandAfter("джарвис"))
+        org.junit.Assert.assertEquals("включи музыку", WakeWord.commandAfter("Пятница, включи музыку"))
+        org.junit.Assert.assertEquals("", WakeWord.commandAfter("пятница"))
         org.junit.Assert.assertNull(WakeWord.commandAfter("включи музыку"))
     }
 
