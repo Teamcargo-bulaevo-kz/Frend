@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, voice-hotword-background ]
+    branches: [ main, voice-hotword-background, hotword-universal ]
   workflow_dispatch:
 
 jobs:
