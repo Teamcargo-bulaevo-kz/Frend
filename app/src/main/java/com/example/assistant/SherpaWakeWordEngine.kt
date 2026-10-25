@@ -12,12 +12,7 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineToneCtcModelConfig
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
-import java.io.BufferedInputStream
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -70,8 +65,7 @@ class SherpaWakeWordEngine(context: Context) {
                 )
                 check(minBytes > 0) { "Телефон не поддерживает запись аудио 8 кГц" }
                 val audio = AudioRecord(
-                    // VOICE_RECOGNITION asks Android for the speech-oriented input path when available.
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    MediaRecorder.AudioSource.MIC,
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
@@ -95,7 +89,6 @@ class SherpaWakeWordEngine(context: Context) {
                     Log.w(TAG, "Noise suppression is unavailable", e)
                 }
                 audio.startRecording()
-                check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
                 onStatus("Микрофон активен. Ожидаю слово «${WakeWordService.phraseTitle(appContext)}»…")
                 var wakeWordPartialSent = false
                 var lastPartial = ""
@@ -188,59 +181,14 @@ class SherpaWakeWordEngine(context: Context) {
     }
 
     private fun ensureModel(onStatus: (String) -> Unit) {
-        if (File(modelDir, "model.onnx").isFile && File(modelDir, "tokens.txt").isFile) return
-        if (copyBundledModel(onStatus)) return
-        val archive = File(appContext.cacheDir, "russian-t-one-model.tar.bz2")
-        val tempDir = File(appContext.filesDir, "$MODEL_DIR.tmp")
-        tempDir.deleteRecursively()
-        tempDir.mkdirs()
-        onStatus("Загрузка модели распознавания (около 140 МБ)…")
-        val connection = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
+        val model = File(modelDir, "model.onnx")
+        val tokens = File(modelDir, "tokens.txt")
+        if (model.isFile && model.length() > 10_000_000L && tokens.isFile) return
+        check(copyBundledModel(onStatus)) {
+            "В APK нет встроенной русской модели распознавания. Скачивание модели отключено."
         }
-        try {
-            connection.connect()
-            check(connection.responseCode in 200..299) { "Не удалось скачать русскую модель (HTTP ${connection.responseCode})" }
-            connection.inputStream.use { input ->
-                archive.outputStream().use { output -> input.copyTo(output) }
-            }
-        } finally {
-            connection.disconnect()
-        }
-
-        onStatus("Распаковка модели…")
-        try {
-            BufferedInputStream(archive.inputStream()).use { buffered ->
-                BZip2CompressorInputStream(buffered).use { bz ->
-                    TarArchiveInputStream(bz).use { tar ->
-                        var entry = tar.nextTarEntry
-                        while (entry != null) {
-                            val name = File(entry.name).name
-                            if (!entry.isDirectory && (name == "model.onnx" || name == "tokens.txt" || name == "LICENSE")) {
-                                val out = File(tempDir, name)
-                                out.outputStream().use { output ->
-                                    val buffer = ByteArray(8192)
-                                    while (true) {
-                                        val count = tar.read(buffer)
-                                        if (count < 0) break
-                                        output.write(buffer, 0, count)
-                                    }
-                                }
-                            }
-                            entry = tar.nextTarEntry
-                        }
-                    }
-                }
-            }
-            check(File(tempDir, "model.onnx").length() > 10_000_000L) { "Файл модели скачан не полностью" }
-            check(File(tempDir, "tokens.txt").isFile) { "В архиве нет tokens.txt" }
-            modelDir.deleteRecursively()
-            check(tempDir.renameTo(modelDir)) { "Не удалось сохранить файлы модели" }
-        } finally {
-            archive.delete()
-            tempDir.deleteRecursively()
+        check(model.isFile && model.length() > 10_000_000L && tokens.isFile) {
+            "Не удалось подготовить встроенную русскую модель"
         }
     }
 
@@ -250,7 +198,5 @@ class SherpaWakeWordEngine(context: Context) {
         private const val FRAME_SAMPLES = 800
         private const val ASSET_DIR = "wake-model"
         private const val MODEL_DIR = "sherpa-onnx-streaming-t-one-russian-2025-09-08"
-        private const val MODEL_URL =
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-t-one-russian-2025-09-08.tar.bz2"
     }
 }
