@@ -68,9 +68,11 @@ class SherpaWakeWordEngine(context: Context) {
                 val failures = mutableListOf<String>()
                 var audio: AudioRecord? = null
                 var captureRate = SAMPLE_RATE
+                // MIC первым: на телефоне пользователя (Redmi) источник VOICE_RECOGNITION открывается, но звук не распознаётся
+                // (это подтвердила ветка fix/mic-only-preserve-settings). Остальные источники — запасные.
                 val sources = listOf(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
                     MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
                     MediaRecorder.AudioSource.DEFAULT
                 ).distinct()
                 search@ for (source in sources) {
