@@ -63,48 +63,85 @@ class SherpaWakeWordEngine(context: Context) {
                 val s = r.createStream()
                 stream = s
 
-                val minBytes = AudioRecord.getMinBufferSize(
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT
-                )
-                check(minBytes > 0) { "Телефон не поддерживает запись аудио 8 кГц" }
-                val audio = AudioRecord(
-                    // VOICE_RECOGNITION asks Android for the speech-oriented input path when available.
+                // Телефоны по-разному открывают микрофон: пробуем источники и частоты по очереди и берём первую
+                // комбинацию, которая реально пишет звук. Если частота не 8 кГц, звук понижается до 8 кГц.
+                val failures = mutableListOf<String>()
+                var audio: AudioRecord? = null
+                var captureRate = SAMPLE_RATE
+                val sources = listOf(
                     MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    maxOf(minBytes * 2, FRAME_SAMPLES * 2)
+                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.DEFAULT
+                ).distinct()
+                search@ for (source in sources) {
+                    for (rate in AudioResampler.RATES) {
+                        val minBytes = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                        if (minBytes <= 0) {
+                            failures += "${rate}Гц/источник $source: размер буфера $minBytes"
+                            continue
+                        }
+                        val frame = AudioResampler.frameSamples(rate)
+                        var candidate: AudioRecord? = null
+                        try {
+                            candidate = AudioRecord(
+                                source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                                maxOf(minBytes * 2, frame * 2 * 2)
+                            )
+                            if (candidate.state != AudioRecord.STATE_INITIALIZED) {
+                                failures += "${rate}Гц/источник $source: не открылся"
+                                candidate.release()
+                                continue
+                            }
+                            candidate.startRecording()
+                            // Проверяем, что звук действительно идёт: первое чтение должно вернуть данные
+                            val probe = ShortArray(frame)
+                            val got = if (candidate.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                                candidate.read(probe, 0, probe.size, AudioRecord.READ_BLOCKING)
+                            } else -1
+                            if (got <= 0) {
+                                failures += "${rate}Гц/источник $source: нет данных ($got)"
+                                try { candidate.stop() } catch (_: Exception) {}
+                                candidate.release()
+                                continue
+                            }
+                            audio = candidate
+                            captureRate = rate
+                            Log.i(TAG, "Микрофон открыт: ${rate} Гц, источник $source")
+                            break@search
+                        } catch (e: Exception) {
+                            failures += "${rate}Гц/источник $source: ${e.javaClass.simpleName}"
+                            try { candidate?.release() } catch (_: Exception) {}
+                        }
+                    }
+                }
+                val mic = audio ?: error(
+                    "Не удалось запустить микрофон. Проверь разрешение на микрофон и закрой приложения, которые пишут звук. " +
+                        "Что пробовал: " + failures.takeLast(6).joinToString("; ")
                 )
-                check(audio.state == AudioRecord.STATE_INITIALIZED) { "Не удалось открыть микрофон" }
-                recorder = audio
+                recorder = mic
                 // Reduce speaker/music bleed where the phone exposes these effects.
                 try {
                     if (AcousticEchoCanceler.isAvailable()) {
-                        echoCanceler = AcousticEchoCanceler.create(audio.audioSessionId)?.apply { enabled = true }
+                        echoCanceler = AcousticEchoCanceler.create(mic.audioSessionId)?.apply { enabled = true }
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Echo cancellation is unavailable", e)
                 }
                 try {
                     if (NoiseSuppressor.isAvailable()) {
-                        noiseSuppressor = NoiseSuppressor.create(audio.audioSessionId)?.apply { enabled = true }
+                        noiseSuppressor = NoiseSuppressor.create(mic.audioSessionId)?.apply { enabled = true }
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Noise suppression is unavailable", e)
                 }
-                audio.startRecording()
-                check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
                 onStatus("Микрофон активен. Ожидаю слово «${WakeWordService.phraseTitle(appContext)}»…")
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var framesSinceLevel = 0
-                val pcm = ShortArray(FRAME_SAMPLES)
-                val floats = FloatArray(FRAME_SAMPLES)
+                val pcm = ShortArray(AudioResampler.frameSamples(captureRate))
 
                 while (running.get()) {
-                    val n = audio.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
+                    val n = mic.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
                     if (n <= 0) continue
                     framesSinceLevel++
                     if (framesSinceLevel >= 10) {
@@ -114,8 +151,8 @@ class SherpaWakeWordEngine(context: Context) {
                         onAudioLevel(level)
                         framesSinceLevel = 0
                     }
-                    for (i in 0 until n) floats[i] = pcm[i] / 32768.0f
-                    s.acceptWaveform(if (n == floats.size) floats else floats.copyOf(n), SAMPLE_RATE)
+                    val floats = AudioResampler.toModel(pcm, n, captureRate)
+                    if (floats.isNotEmpty()) s.acceptWaveform(floats, SAMPLE_RATE)
                     while (r.isReady(s)) r.decode(s)
                     // Streaming recognizers can identify the wake word before an endpoint.
                     // Emit a bare wake word immediately; commands are emitted only at endpoint.
