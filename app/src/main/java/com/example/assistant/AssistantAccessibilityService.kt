@@ -9,8 +9,8 @@ import kotlinx.coroutines.delay
 
 /**
  * Служба специальных возможностей. Нужна для двух вещей, которые Android не даёт обычным приложениям:
- * сделать скриншот и нажать плитку в шторке (Wi-Fi, Bluetooth, режим полёта...). Экран она не читает:
- * содержимое смотрится только в шторке и только когда ассистент выполняет такую команду.
+ * сделать скриншот и нажать плитку в шторке (Wi-Fi, Bluetooth, режим полёта...). Экран она читает только по просьбе
+ * пользователя и только если он включил «Чтение экрана» в настройках ассистента (readScreen). Пароли не читаются.
  * Включается один раз вручную: Настройки → Специальные возможности → Assistant.
  */
 class AssistantAccessibilityService : AccessibilityService() {
@@ -96,6 +96,37 @@ class AssistantAccessibilityService : AccessibilityService() {
     fun hasWindowAccess(): Boolean = serviceInfo?.capabilities?.and(
         android.accessibilityservice.AccessibilityServiceInfo.CAPABILITY_CAN_RETRIEVE_WINDOW_CONTENT
     ).let { it != null && it != 0 }
+
+    /**
+     * Текст открытого окна для вопросов «что на экране». Пароли пропускаются, длина ограничена,
+     * чтобы не тратить лимит модели. Возвращает null, если окно не отдаёт содержимое.
+     */
+    fun readScreen(maxChars: Int = 3000): String? {
+        val root = rootInActiveWindow ?: return null
+        val lines = ArrayList<String>()
+        var total = 0
+        var visited = 0
+        fun walk(n: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 30 || visited > 800 || total >= maxChars) return
+            visited++
+            if (!n.isVisibleToUser) return
+            if (!n.isPassword) {
+                val t = nodeText(n).trim()
+                if (t.isNotEmpty() && lines.lastOrNull() != t) {
+                    lines.add(t)
+                    total += t.length + 1
+                }
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { walk(it, depth + 1) }
+        }
+        walk(root, 0)
+        if (lines.isEmpty()) return null
+        val pkg = root.packageName?.toString().orEmpty()
+        val label = try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (e: Exception) { pkg }
+        return ("Открыто: $label\n" + lines.joinToString("\n")).take(maxChars)
+    }
 
     private fun closeShade() {
         performGlobalAction(GLOBAL_ACTION_BACK)

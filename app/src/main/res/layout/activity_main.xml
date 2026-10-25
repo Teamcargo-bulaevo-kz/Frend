@@ -265,6 +265,17 @@
             android:textColor="@color/chat_text"
             android:textSize="15sp" />
 
+        <TextView
+            android:id="@+id/privacySettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:padding="16dp"
+            android:text="Что ассистент может видеть"
+            android:textColor="@color/chat_text"
+            android:textSize="15sp" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/testWakeButton"
             android:layout_width="match_parent"

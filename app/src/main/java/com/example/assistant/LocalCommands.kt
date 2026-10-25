@@ -43,6 +43,7 @@ object LocalCommands {
         parsePlaylistAndLibrary(t)?.let { return it }
         parseMusicPlay(t)?.let { return it }
         parseSharedList(t, w)?.let { return it }
+        parseDeviceInfo(w)?.let { return it }
         parseQuickToggle(t, w)?.let { return it }
         parseWebSearch(t)?.let { return it }
         parseSettings(t, w)?.let { return it }
@@ -540,6 +541,37 @@ object LocalCommands {
         "date" to listOf("дата", "времени", "часовой"),
         "accessibility" to listOf("специальн", "доступност")
     )
+
+    // ---------------------------------------------------------------- состояние телефона
+
+    private val deviceControlVerbs = setOf(
+        "включи", "выключи", "отключи", "поставь", "установи", "измени", "открой", "запусти", "найди", "удали",
+        "очисти", "почисти", "закрой", "убери", "сделай", "добавь", "переведи", "перевести"
+    )
+
+    /** «Сколько заряда», «какая сеть», «что занимает память»: отвечаем сразу, без модели. Управление телефоном сюда не попадает. */
+    private fun parseDeviceInfo(w: List<String>): LocalCommand? {
+        if (w.size > 9 || w.any { it in deviceControlVerbs }) return null
+        fun has(vararg stems: String) = w.any { x -> stems.any { x.startsWith(it) } }
+        fun cmd(section: String) = LocalCommand("device_info", mapOf("section" to section))
+
+        val asks = has("сколько", "как", "что", "покажи", "скажи", "узнай", "проверь", "когда", "есть", "работает")
+        if (!asks && !has("статистик", "статус", "сводк", "диагностик")) return null
+
+        if (has("состоян", "статус", "сводк", "диагностик") && has("телефон", "устройств", "смартфон")) return cmd("all")
+        if (has("какие") && has("приложени") && has("занима", "съедают", "жрут", "много")) return cmd("apps_storage")
+        if (has("что") && has("занима", "съедает", "жрёт", "жрет") && has("памят", "мест", "хранилищ")) return cmd("apps_storage")
+        if (has("приложени", "программ") && has("чаще", "дольше", "больше", "использую", "пользуюсь", "статистик")) return cmd("apps_usage")
+        if (has("экранн") && has("врем")) return cmd("apps_usage")
+        if (has("процесс")) return cmd("processes")
+        if (has("тормозит", "грузит", "нагружает") && has("телефон", "приложени", "что")) return cmd("processes")
+        if (has("заряд", "батаре", "аккумулятор", "зарядк", "зарядит") && !has("настройк", "экономи")) return cmd("battery")
+        if (has("сеть", "сети", "сетью", "интернет", "вайфай", "wifi", "сигнал") &&
+            has("состоян", "какая", "какой", "есть", "работает", "скорост", "сигнал", "проверь", "статус", "как")) return cmd("network")
+        if (has("оператив", "озу", "ram")) return cmd("memory")
+        if (has("памят", "хранилищ", "места") && has("сколько", "осталось", "свобод", "занят", "хватает", "много", "мало", "как")) return cmd("memory_all")
+        return null
+    }
 
     private fun parseSettings(t: String, w: List<String>): LocalCommand? {
         if (w.size > 5) return null

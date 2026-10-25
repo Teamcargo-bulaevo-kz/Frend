@@ -407,6 +407,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
             "find_contact" -> withContext(Dispatchers.IO) { ContactActions.info(context, a.optString("name", "")) }
 
+            "device_info" -> withContext(Dispatchers.IO) { DeviceActions.report(context, a.optString("section", "all")) }
+            "read_screen" -> withContext(Dispatchers.IO) { DeviceActions.readScreen(context) }
             "web_search" -> webSearchChecked(a.optString("query", ""))
             "set_profile" -> setProfile(a.optString("field", ""), a.optString("value", ""))
             "schedule_digest" -> DigestActions.add(context, a.optString("topic", ""), a.optStringOrNull("time"))

@@ -173,6 +173,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.appVersion).text = "V${BuildConfig.VERSION_NAME}"
 
         WakeWordService.applyPhrase(this)
+        findViewById<TextView>(R.id.privacySettings).setOnClickListener {
+            drawer.closeDrawers()
+            showPrivacySettings()
+        }
         findViewById<TextView>(R.id.wakeSettings).setOnClickListener {
             drawer.closeDrawers()
             showWakeSettings()
@@ -329,6 +333,42 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { sendPrompt(text) }
             })
         }
+    }
+
+    /** Что ассистент может видеть: у каждого пункта своё разрешение, всё выключено по умолчанию. */
+    private fun showPrivacySettings() {
+        val screenOn = Privacy.screenAllowed(this)
+        val usageOn = DeviceStatus.hasUsageAccess(this)
+        val labels = arrayOf(
+            "Чтение экрана: ${if (screenOn) "ВКЛЮЧЕНО" else "выключено"} (нажми, чтобы сменить)",
+            "История использования приложений: ${if (usageOn) "разрешено" else "не разрешено"} (открыть настройки)",
+            "Служба специальных возможностей (нужна для чтения экрана и плиток шторки)",
+            "Shizuku (процессы и память по приложениям): скоро"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Что ассистент может видеть")
+            .setItems(labels) { dialog, which ->
+                when (which) {
+                    0 -> {
+                        Privacy.setScreenAllowed(this, !screenOn)
+                        Toast.makeText(
+                            this,
+                            if (!screenOn) "Чтение экрана включено: читаю только когда просишь, текст уходит в ИИ для ответа, пароли не читаются" else "Чтение экрана выключено",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    1 -> try { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) } catch (e: Exception) {
+                        Toast.makeText(this, "Открой Настройки → Приложения → Специальный доступ → История использования", Toast.LENGTH_LONG).show()
+                    }
+                    2 -> try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) {
+                        Toast.makeText(this, "Открой Настройки → Специальные возможности", Toast.LENGTH_LONG).show()
+                    }
+                    else -> Toast.makeText(this, "Shizuku подключим позже, всё уже подготовлено", Toast.LENGTH_SHORT).show()
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
     }
 
     /** Слово активации и быстрый переход к настройке батареи. */
