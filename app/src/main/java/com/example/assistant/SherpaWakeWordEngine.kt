@@ -63,42 +63,64 @@ class SherpaWakeWordEngine(context: Context) {
                 val s = r.createStream()
                 stream = s
 
-                // Некоторые прошивки не поддерживают захват напрямую на 8 кГц.
-                // В таком случае захватываем звук на стандартной частоте и переводим его в 8 кГц для модели.
-                val audioConfig = listOf(SAMPLE_RATE, 16000, 44100, 48000, 22050)
-                    .distinct()
-                    .firstNotNullOfOrNull { rate ->
+                // Проверяем комбинации частоты и источника. На некоторых прошивках AudioRecord
+                // может создаться, но startRecording() всё равно завершается ошибкой.
+                val failures = mutableListOf<String>()
+                var selected: Pair<Int, AudioRecord>? = null
+                val sources = listOf(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.DEFAULT
+                ).distinct()
+                val rates = listOf(SAMPLE_RATE, 16000, 22050, 44100, 48000).distinct()
+                search@ for (source in sources) {
+                    for (rate in rates) {
                         val minBytes = AudioRecord.getMinBufferSize(
                             rate,
                             AudioFormat.CHANNEL_IN_MONO,
                             AudioFormat.ENCODING_PCM_16BIT
                         )
                         if (minBytes <= 0) {
-                            Log.w(TAG, "AudioRecord rate $rate rejected by getMinBufferSize: $minBytes")
-                            null
-                        } else {
-                            val frameSamples = rate / 10 // approximately 100 ms per read
-                            val candidate = try {
-                                AudioRecord(
-                                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                                    rate,
-                                    AudioFormat.CHANNEL_IN_MONO,
-                                    AudioFormat.ENCODING_PCM_16BIT,
-                                    maxOf(minBytes * 2, frameSamples * 2)
-                                )
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Could not create AudioRecord at $rate Hz", e)
-                                null
-                            }
-                            if (candidate != null && candidate.state == AudioRecord.STATE_INITIALIZED) {
-                                rate to candidate
-                            } else {
-                                candidate?.release()
-                                Log.w(TAG, "AudioRecord failed to initialize at $rate Hz")
-                                null
-                            }
+                            failures += "${rate}Hz/source=$source: minBuffer=$minBytes"
+                            Log.w(TAG, failures.last())
+                            continue
                         }
-                    } ?: error("Не удалось открыть микрофон ни на 8, 16, 22.05, 44.1, ни на 48 кГц")
+                        val frameSamples = rate / 10
+                        var candidate: AudioRecord? = null
+                        try {
+                            candidate = AudioRecord(
+                                source,
+                                rate,
+                                AudioFormat.CHANNEL_IN_MONO,
+                                AudioFormat.ENCODING_PCM_16BIT,
+                                maxOf(minBytes * 2, frameSamples * 2)
+                            )
+                            if (candidate.state != AudioRecord.STATE_INITIALIZED) {
+                                failures += "${rate}Hz/source=$source: not initialized"
+                                candidate.release()
+                                continue
+                            }
+                            candidate.startRecording()
+                            if (candidate.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                                failures += "${rate}Hz/source=$source: not recording after start"
+                                try { candidate.stop() } catch (_: Exception) {}
+                                candidate.release()
+                                continue
+                            }
+                            selected = rate to candidate
+                            Log.i(TAG, "Microphone opened: rate=$rate, source=$source")
+                            break@search
+                        } catch (e: Exception) {
+                            failures += "${rate}Hz/source=$source: ${e.javaClass.simpleName}: ${e.message ?: "no details"}"
+                            Log.w(TAG, "AudioRecord start failed: rate=$rate source=$source", e)
+                            try { candidate?.release() } catch (_: Exception) {}
+                        }
+                    }
+                }
+                val audioConfig = selected ?: error(
+                    "Не удалось запустить микрофон. Проверь разрешение на микрофон и закрой другие приложения, использующие запись. " +
+                        "Диагностика: " + failures.takeLast(8).joinToString("; ")
+                )
                 val captureRate = audioConfig.first
                 val audio = audioConfig.second
                 val captureFrameSamples = captureRate / 10
@@ -123,8 +145,6 @@ class SherpaWakeWordEngine(context: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "Noise suppression is unavailable", e)
                 }
-                audio.startRecording()
-                check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "AudioRecord не начал запись" }
                 onStatus("Микрофон активен. Ожидаю слово «${WakeWordService.phraseTitle(appContext)}»…")
                 var wakeWordPartialSent = false
                 var lastPartial = ""
