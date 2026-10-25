@@ -164,8 +164,32 @@ class SherpaWakeWordEngine(context: Context) {
         try { recorder?.stop() } catch (_: Exception) {}
     }
 
+    /** Модель, вшитая в APK при сборке (assets/wake-model): копируем во внутреннюю память, интернет не нужен. */
+    private fun copyBundledModel(onStatus: (String) -> Unit): Boolean {
+        val names = try { appContext.assets.list(ASSET_DIR)?.toSet().orEmpty() } catch (e: Exception) { emptySet() }
+        if ("model.onnx" !in names || "tokens.txt" !in names) return false
+        onStatus("Подготовка встроенной модели…")
+        val tempDir = File(appContext.filesDir, "$MODEL_DIR.tmp")
+        tempDir.deleteRecursively()
+        tempDir.mkdirs()
+        try {
+            for (name in listOf("model.onnx", "tokens.txt")) {
+                appContext.assets.open("$ASSET_DIR/$name").use { input ->
+                    File(tempDir, name).outputStream().use { input.copyTo(it) }
+                }
+            }
+            check(File(tempDir, "model.onnx").length() > 10_000_000L) { "Встроенная модель повреждена" }
+            modelDir.deleteRecursively()
+            check(tempDir.renameTo(modelDir)) { "Не удалось сохранить файлы модели" }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+        return true
+    }
+
     private fun ensureModel(onStatus: (String) -> Unit) {
         if (File(modelDir, "model.onnx").isFile && File(modelDir, "tokens.txt").isFile) return
+        if (copyBundledModel(onStatus)) return
         val archive = File(appContext.cacheDir, "russian-t-one-model.tar.bz2")
         val tempDir = File(appContext.filesDir, "$MODEL_DIR.tmp")
         tempDir.deleteRecursively()
@@ -224,6 +248,7 @@ class SherpaWakeWordEngine(context: Context) {
         private const val TAG = "SherpaWakeWord"
         private const val SAMPLE_RATE = 8000
         private const val FRAME_SAMPLES = 800
+        private const val ASSET_DIR = "wake-model"
         private const val MODEL_DIR = "sherpa-onnx-streaming-t-one-russian-2025-09-08"
         private const val MODEL_URL =
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-t-one-russian-2025-09-08.tar.bz2"

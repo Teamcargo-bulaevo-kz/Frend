@@ -27,6 +27,9 @@ android {
 
     buildFeatures { buildConfig = true }
 
+    // Модель весит около 130 МБ и почти не сжимается — не тратим время на упаковку
+    androidResources { noCompress += listOf("onnx") }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
