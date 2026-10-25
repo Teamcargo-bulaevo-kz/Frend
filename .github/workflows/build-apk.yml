@@ -36,7 +36,7 @@ jobs:
         run: |
           set -e
           mkdir -p app/src/main/assets/wake-model /tmp/wm
-          curl -fL --retry 5 --retry-delay 5 -o /tmp/wm/model.tar.bz2 \\
+          curl -fL --retry 5 --retry-delay 5 -o /tmp/wm/model.tar.bz2 \
             https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-t-one-russian-2025-09-08.tar.bz2
           tar -xjf /tmp/wm/model.tar.bz2 -C /tmp/wm
           cp /tmp/wm/*/model.onnx /tmp/wm/*/tokens.txt app/src/main/assets/wake-model/
