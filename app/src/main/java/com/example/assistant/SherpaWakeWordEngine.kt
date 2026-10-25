@@ -68,6 +68,7 @@ class SherpaWakeWordEngine(context: Context) {
                 val failures = mutableListOf<String>()
                 var audio: AudioRecord? = null
                 var captureRate = SAMPLE_RATE
+                var chosenSource = -1
                 // MIC первым: на телефоне пользователя (Redmi) источник VOICE_RECOGNITION открывается, но звук не распознаётся
                 // (это подтвердила ветка fix/mic-only-preserve-settings). Остальные источники — запасные.
                 val sources = listOf(
@@ -108,6 +109,7 @@ class SherpaWakeWordEngine(context: Context) {
                             }
                             audio = candidate
                             captureRate = rate
+                            chosenSource = source
                             Log.i(TAG, "Микрофон открыт: ${rate} Гц, источник $source")
                             break@search
                         } catch (e: Exception) {
@@ -136,7 +138,13 @@ class SherpaWakeWordEngine(context: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "Noise suppression is unavailable", e)
                 }
-                onStatus("Микрофон активен. Ожидаю слово «${WakeWordService.phraseTitle(appContext)}»…")
+                val sourceName = when (chosenSource) {
+                    MediaRecorder.AudioSource.MIC -> "MIC"
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION -> "VOICE_RECOGNITION"
+                    else -> "DEFAULT"
+                }
+                // Источник и частота видны в уведомлении: по ним ясно, как именно открылся микрофон на этом телефоне
+                onStatus("Микрофон активен ($sourceName, $captureRate Гц). Ожидаю слово «${WakeWordService.phraseTitle(appContext)}»…")
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var framesSinceLevel = 0
