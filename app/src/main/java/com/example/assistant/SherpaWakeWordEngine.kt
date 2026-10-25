@@ -63,21 +63,50 @@ class SherpaWakeWordEngine(context: Context) {
                 val s = r.createStream()
                 stream = s
 
-                val minBytes = AudioRecord.getMinBufferSize(
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT
-                )
-                check(minBytes > 0) { "Телефон не поддерживает запись аудио 8 кГц" }
-                val audio = AudioRecord(
-                    // VOICE_RECOGNITION asks Android for the speech-oriented input path when available.
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    maxOf(minBytes * 2, FRAME_SAMPLES * 2)
-                )
-                check(audio.state == AudioRecord.STATE_INITIALIZED) { "Не удалось открыть микрофон" }
+                // Некоторые прошивки не поддерживают захват напрямую на 8 кГц.
+                // В таком случае захватываем звук на стандартной частоте и переводим его в 8 кГц для модели.
+                val audioConfig = listOf(SAMPLE_RATE, 16000, 44100, 48000, 22050)
+                    .distinct()
+                    .firstNotNullOfOrNull { rate ->
+                        val minBytes = AudioRecord.getMinBufferSize(
+                            rate,
+                            AudioFormat.CHANNEL_IN_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT
+                        )
+                        if (minBytes <= 0) {
+                            Log.w(TAG, "AudioRecord rate $rate rejected by getMinBufferSize: $minBytes")
+                            null
+                        } else {
+                            val frameSamples = rate / 10 // approximately 100 ms per read
+                            val candidate = try {
+                                AudioRecord(
+                                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                                    rate,
+                                    AudioFormat.CHANNEL_IN_MONO,
+                                    AudioFormat.ENCODING_PCM_16BIT,
+                                    maxOf(minBytes * 2, frameSamples * 2)
+                                )
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Could not create AudioRecord at $rate Hz", e)
+                                null
+                            }
+                            if (candidate != null && candidate.state == AudioRecord.STATE_INITIALIZED) {
+                                rate to candidate
+                            } else {
+                                candidate?.release()
+                                Log.w(TAG, "AudioRecord failed to initialize at $rate Hz")
+                                null
+                            }
+                        }
+                    } ?: error("Не удалось открыть микрофон ни на 8, 16, 22.05, 44.1, ни на 48 кГц")
+                val captureRate = audioConfig.first
+                val audio = audioConfig.second
+                val captureFrameSamples = captureRate / 10
+                onStatus(if (captureRate == SAMPLE_RATE) {
+                    "Микрофон открыт на 8 кГц"
+                } else {
+                    "Микрофон открыт на $captureRate Гц; преобразую звук в 8 кГц"
+                })
                 recorder = audio
                 // Reduce speaker/music bleed where the phone exposes these effects.
                 try {
@@ -100,9 +129,8 @@ class SherpaWakeWordEngine(context: Context) {
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var framesSinceLevel = 0
-                val pcm = ShortArray(FRAME_SAMPLES)
-                val floats = FloatArray(FRAME_SAMPLES)
-
+                val pcm = ShortArray(captureFrameSamples)
+                
                 while (running.get()) {
                     val n = audio.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
                     if (n <= 0) continue
@@ -114,8 +142,8 @@ class SherpaWakeWordEngine(context: Context) {
                         onAudioLevel(level)
                         framesSinceLevel = 0
                     }
-                    for (i in 0 until n) floats[i] = pcm[i] / 32768.0f
-                    s.acceptWaveform(if (n == floats.size) floats else floats.copyOf(n), SAMPLE_RATE)
+                    val floats = resampleToModelRate(pcm, n, captureRate)
+                    if (floats.isNotEmpty()) s.acceptWaveform(floats, SAMPLE_RATE)
                     while (r.isReady(s)) r.decode(s)
                     // Streaming recognizers can identify the wake word before an endpoint.
                     // Emit a bare wake word immediately; commands are emitted only at endpoint.
@@ -157,6 +185,27 @@ class SherpaWakeWordEngine(context: Context) {
                 recognizer = null
             }
         }, "sherpa-wake-word").start()
+    }
+
+    /**
+     * Преобразует PCM-захват в частоту, ожидаемую моделью (8 кГц).
+     * Входной буфер — короткий блок примерно 100 мс, поэтому линейной интерполяции достаточно.
+     */
+    private fun resampleToModelRate(pcm: ShortArray, length: Int, inputRate: Int): FloatArray {
+        if (length <= 0) return FloatArray(0)
+        if (inputRate == SAMPLE_RATE) {
+            return FloatArray(length) { i -> pcm[i] / 32768.0f }
+        }
+        val outputLength = (length.toDouble() * SAMPLE_RATE / inputRate).toInt().coerceAtLeast(1)
+        return FloatArray(outputLength) { i ->
+            val sourcePosition = i.toDouble() * inputRate / SAMPLE_RATE
+            val left = sourcePosition.toInt().coerceIn(0, length - 1)
+            val right = (left + 1).coerceAtMost(length - 1)
+            val fraction = (sourcePosition - left).toFloat()
+            val a = pcm[left].toFloat()
+            val b = pcm[right].toFloat()
+            (a + (b - a) * fraction) / 32768.0f
+        }
     }
 
     fun stop() {
