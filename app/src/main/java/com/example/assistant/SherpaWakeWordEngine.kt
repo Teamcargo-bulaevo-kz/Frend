@@ -10,17 +10,12 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineToneCtcModelConfig
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
-import java.io.BufferedInputStream
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Fully local microphone recognition. The model is downloaded once (about 140 MB)
- * and then reused offline. The Russian T-One model is streaming and runs at 8 kHz.
+ * Offline Russian speech recognition. The model is bundled in the APK and copied
+ * to private app storage on first start. Microphone capture remains on the known-working MIC/8 kHz path.
  */
 class SherpaWakeWordEngine(context: Context) {
     private val appContext = context.applicationContext
@@ -111,56 +106,33 @@ class SherpaWakeWordEngine(context: Context) {
         try { recorder?.stop() } catch (_: Exception) {}
     }
 
+    /** Copies the model bundled in APK assets. No runtime model download is attempted. */
     private fun ensureModel() {
-        if (File(modelDir, "model.onnx").isFile && File(modelDir, "tokens.txt").isFile) return
-        val archive = File(appContext.cacheDir, "russian-t-one-model.tar.bz2")
-        val tempDir = File(appContext.filesDir, "$MODEL_DIR.tmp")
-        tempDir.deleteRecursively()
-        tempDir.mkdirs()
-        val connection = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-        }
-        try {
-            connection.connect()
-            check(connection.responseCode in 200..299) { "Не удалось скачать русскую модель (HTTP ${connection.responseCode})" }
-            connection.inputStream.use { input ->
-                archive.outputStream().use { output -> input.copyTo(output) }
-            }
-        } finally {
-            connection.disconnect()
+        val model = File(modelDir, "model.onnx")
+        val tokens = File(modelDir, "tokens.txt")
+        if (model.isFile && model.length() > 10_000_000L && tokens.isFile) return
+
+        val assetNames = appContext.assets.list(ASSET_DIR)?.toSet().orEmpty()
+        check("model.onnx" in assetNames && "tokens.txt" in assetNames) {
+            "В APK нет встроенной русской модели распознавания (assets/wake-model)"
         }
 
+        val tempDir = File(appContext.filesDir, "$MODEL_DIR.tmp")
+        tempDir.deleteRecursively()
+        check(tempDir.mkdirs() || tempDir.isDirectory) { "Не удалось создать каталог модели" }
         try {
-            BufferedInputStream(archive.inputStream()).use { buffered ->
-                BZip2CompressorInputStream(buffered).use { bz ->
-                    TarArchiveInputStream(bz).use { tar ->
-                        var entry = tar.nextTarEntry
-                        while (entry != null) {
-                            val name = File(entry.name).name
-                            if (!entry.isDirectory && (name == "model.onnx" || name == "tokens.txt" || name == "LICENSE")) {
-                                val out = File(tempDir, name)
-                                out.outputStream().use { output ->
-                                    val buffer = ByteArray(8192)
-                                    while (true) {
-                                        val count = tar.read(buffer)
-                                        if (count < 0) break
-                                        output.write(buffer, 0, count)
-                                    }
-                                }
-                            }
-                            entry = tar.nextTarEntry
-                        }
-                    }
+            for (name in listOf("model.onnx", "tokens.txt")) {
+                appContext.assets.open("$ASSET_DIR/$name").use { input ->
+                    File(tempDir, name).outputStream().use { output -> input.copyTo(output) }
                 }
             }
-            check(File(tempDir, "model.onnx").length() > 10_000_000L) { "Файл модели скачан не полностью" }
-            check(File(tempDir, "tokens.txt").isFile) { "В архиве нет tokens.txt" }
+            check(File(tempDir, "model.onnx").length() > 10_000_000L) {
+                "Встроенная модель повреждена или скопирована не полностью"
+            }
+            check(File(tempDir, "tokens.txt").isFile) { "Во встроенной модели отсутствует tokens.txt" }
             modelDir.deleteRecursively()
-            check(tempDir.renameTo(modelDir)) { "Не удалось сохранить файлы модели" }
+            check(tempDir.renameTo(modelDir)) { "Не удалось сохранить файлы встроенной модели" }
         } finally {
-            archive.delete()
             tempDir.deleteRecursively()
         }
     }
@@ -169,8 +141,7 @@ class SherpaWakeWordEngine(context: Context) {
         private const val TAG = "SherpaWakeWord"
         private const val SAMPLE_RATE = 8000
         private const val FRAME_SAMPLES = 800
+        private const val ASSET_DIR = "wake-model"
         private const val MODEL_DIR = "sherpa-onnx-streaming-t-one-russian-2025-09-08"
-        private const val MODEL_URL =
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-t-one-russian-2025-09-08.tar.bz2"
     }
 }
