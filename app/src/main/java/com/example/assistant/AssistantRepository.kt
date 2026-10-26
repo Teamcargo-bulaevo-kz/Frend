@@ -111,7 +111,9 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             } catch (e: GroqApiException) {
                 // Короткий лимит «в минуту»: подождём и повторим один раз сами
                 val wait = if (e.code == 429) MusicTagger.retryDelayMs(e.message.orEmpty()) else null
-                if (wait == null || wait > 20_000L) throw e
+                val maxWait = context.getSharedPreferences("assistant_prefs", android.content.Context.MODE_PRIVATE)
+                    .getInt("retry_wait_seconds", 20).coerceIn(0, 30) * 1000L
+                if (wait == null || maxWait == 0L || wait > maxWait) throw e
                 kotlinx.coroutines.delay(wait + 500)
                 askModel(prompt, normalized)
             }
