@@ -35,7 +35,11 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(
+            appContext?.getSharedPreferences("assistant_prefs", android.content.Context.MODE_PRIVATE)
+                ?.getInt("request_timeout_seconds", 45)?.coerceIn(15, 120) ?: 45,
+            TimeUnit.SECONDS
+        )
         .build()
     private val model = "openai/gpt-oss-120b"
     private val endpoint = "https://api.groq.com/openai/v1/chat/completions"
