@@ -17,6 +17,11 @@ object VoiceInput {
     /** Пауза после остановки озвучки перед записью, чтобы микрофон не слышал хвост голоса ассистента. */
     const val AFTER_SPEECH_DELAY_MS = 350L
 
+    fun afterSpeechDelayMs(context: android.content.Context): Long =
+        context.getSharedPreferences("assistant_prefs", android.content.Context.MODE_PRIVATE)
+            .getInt("voice_input_delay_ms", AFTER_SPEECH_DELAY_MS.toInt())
+            .coerceIn(0, 1500).toLong()
+
     fun intent(prompt: String = "Говорите..."): Intent =
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
