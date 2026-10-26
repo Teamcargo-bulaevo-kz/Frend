@@ -118,6 +118,9 @@ class SettingsActivity : AppCompatActivity() {
         addSeek("Время на команду после активации", (prefs.getLong("command_window_ms", 10_000L) / 1000L).toInt(), " сек", 3, 30) {
             prefs.edit().putLong("command_window_ms", it * 1000L).apply()
         }
+        addSeek("Тайм-аут ответа ИИ", prefs.getInt("request_timeout_seconds", 45), " сек", 15, 120) {
+            prefs.edit().putInt("request_timeout_seconds", it).apply()
+        }
 
         section("Внешний вид", "Изменения сохраняются на устройстве")
         addChoice("Тема приложения", arrayOf("Как в системе", "Светлая", "Тёмная"), prefs.getString("app_theme", "system") ?: "system",
