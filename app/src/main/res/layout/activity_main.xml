@@ -222,6 +222,17 @@
             android:dividerHeight="1dp" />
 
         <TextView
+            android:id="@+id/allSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:padding="16dp"
+            android:text="Все настройки"
+            android:textColor="@color/chat_text"
+            android:textSize="15sp" />
+
+        <TextView
             android:id="@+id/voiceSettings"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
