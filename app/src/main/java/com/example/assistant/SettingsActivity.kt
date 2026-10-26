@@ -102,6 +102,71 @@ class SettingsActivity : AppCompatActivity() {
             prefs.edit().putBoolean("suggestions_enabled", it).apply()
         }
 
+        section("Функции команд", "Каждую возможность можно отключить отдельно. Выключенные функции не выполняются даже по голосовой команде.")
+        val featureGroups = listOf(
+            "Телефон и приложения" to listOf(
+                "set_alarm" to "Будильники",
+                "flashlight" to "Фонарик",
+                "open_camera" to "Открытие камеры",
+                "take_screenshot" to "Скриншоты",
+                "open_app" to "Открытие приложений",
+                "open_browser" to "Браузер и поиск сайтов",
+                "open_settings" to "Системные настройки",
+                "open_dialer" to "Телефон и набор номера",
+                "open_whatsapp" to "WhatsApp"
+            ),
+            "Музыка" to listOf(
+                "play_music" to "Воспроизведение музыки",
+                "music_control" to "Управление плеером",
+                "music_rate" to "Подбор музыки по настроению",
+                "music_tags" to "Теги музыкальных файлов",
+                "music_library" to "Поиск в музыкальной библиотеке",
+                "playlist" to "Создание и изменение плейлистов",
+                "set_volume" to "Громкость телефона/медиа"
+            ),
+            "Файлы и контакты" to listOf(
+                "find_media" to "Поиск фото и видео",
+                "find_files" to "Поиск файлов",
+                "shared_folder" to "Общая папка и работа с файлами",
+                "call_contact" to "Звонки контактам",
+                "message_contact" to "Сообщения контактам",
+                "find_contact" to "Поиск контактов"
+            ),
+            "Система и интернет" to listOf(
+                "device_info" to "Состояние телефона",
+                "read_screen" to "Чтение экрана",
+                "set_brightness" to "Яркость экрана",
+                "quick_setting" to "Быстрые настройки телефона",
+                "web_search" to "Поиск информации в интернете"
+            ),
+            "Планирование и заметки" to listOf(
+                "set_timer" to "Таймеры",
+                "set_reminder" to "Напоминания",
+                "list_reminders" to "Просмотр напоминаний",
+                "cancel_reminder" to "Отмена напоминаний",
+                "calendar_add" to "Создание событий календаря",
+                "calendar_list" to "Просмотр календаря",
+                "create_note" to "Создание заметок",
+                "list_notes" to "Просмотр заметок",
+                "search_notes" to "Поиск заметок",
+                "delete_note" to "Удаление заметок"
+            ),
+            "Профиль и сводки" to listOf(
+                "set_profile" to "Сохранение данных профиля",
+                "schedule_digest" to "Запланированные сводки",
+                "list_digests" to "Просмотр сводок",
+                "cancel_digest" to "Отмена сводок"
+            )
+        )
+        featureGroups.forEach { (groupTitle, features) ->
+            section(groupTitle, "Переключатель влияет только на эту функцию")
+            features.forEach { (key, label) ->
+                addSwitch(label, "Разрешить ассистенту использовать эту команду.", prefs.getBoolean("feature_$key", true)) { enabled ->
+                    prefs.edit().putBoolean("feature_$key", enabled).apply()
+                }
+            }
+        }
+
         section("Звуковые сигналы", "Звуки начала и завершения команды настраиваются независимо")
         addSwitch("Сигнал начала прослушивания", "Короткий сигнал после обнаружения слова активации.", prefs.getBoolean("start_cue_enabled", true)) {
             prefs.edit().putBoolean("start_cue_enabled", it).apply()
