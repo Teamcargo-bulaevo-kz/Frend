@@ -219,6 +219,7 @@ class SettingsActivity : AppCompatActivity() {
         val box = card()
         val valueLabel = TextView(this).apply {
             textSize = 14f
+            text = "$initial$suffix"
             setTextColor(ContextCompat.getColor(context, R.color.chat_text))
             setPadding(0, dp(4), 0, 0)
         }
@@ -258,7 +259,7 @@ class SettingsActivity : AppCompatActivity() {
             setOnClickListener {
                 androidx.appcompat.app.AlertDialog.Builder(this@SettingsActivity)
                     .setTitle(title)
-                    .setSingleChoiceItems(labels, values.indexOf(prefs.getString("app_theme", "system") ?: "system")) { dialog, which ->
+                    .setSingleChoiceItems(labels, values.indexOf(current)) { dialog, which ->
                         onChosen(values[which])
                         dialog.dismiss()
                     }
