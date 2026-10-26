@@ -186,6 +186,12 @@ class SettingsActivity : AppCompatActivity() {
         addSeek("Тайм-аут ответа ИИ", prefs.getInt("request_timeout_seconds", 45), " сек", 15, 120) {
             prefs.edit().putInt("request_timeout_seconds", it).apply()
         }
+        addSeek("Пауза перед запуском голосового ввода", prefs.getInt("voice_input_delay_ms", 350), " мс", 0, 1500) {
+            prefs.edit().putInt("voice_input_delay_ms", it).apply()
+        }
+        addSeek("Максимальное ожидание повтора после лимита API", prefs.getInt("retry_wait_seconds", 20), " сек", 0, 30) {
+            prefs.edit().putInt("retry_wait_seconds", it).apply()
+        }
 
         section("Внешний вид", "Изменения сохраняются на устройстве")
         addChoice("Тема приложения", arrayOf("Как в системе", "Светлая", "Тёмная"), prefs.getString("app_theme", "system") ?: "system",
