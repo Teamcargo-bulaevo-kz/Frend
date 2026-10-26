@@ -37,6 +37,10 @@ import kotlinx.coroutines.withContext
 /** Второе приложение «Музыка»: вся музыка телефона, настроения, жанры, исполнители, папки, проверка разметки и мини-плеер. */
 class MusicActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppSettings.wrap(newBase))
+    }
+
     /** Строка списка: трек или группа (настроение, жанр, исполнитель, папка). */
     private data class Row(
         val title: String, val subtitle: String, val track: MusicTrack? = null,

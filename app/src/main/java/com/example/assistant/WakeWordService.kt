@@ -419,7 +419,7 @@ class WakeWordService : Service() {
                 processingCommand = false
                 handler.removeCallbacks(releaseFocusRunnable)
                 handler.postDelayed(releaseFocusRunnable, 15_000L)
-            }, 1800)
+            }, AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong())
         }
     }
 

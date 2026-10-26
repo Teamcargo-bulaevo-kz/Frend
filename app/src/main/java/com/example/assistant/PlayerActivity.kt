@@ -20,6 +20,10 @@ import kotlinx.coroutines.withContext
 /** Полноэкранный плеер: обложка, перемотка, режимы, очередь, «ещё такое», таймер сна. */
 class PlayerActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppSettings.wrap(newBase))
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var userSeeking = false
     private var shownTrackId = -1L

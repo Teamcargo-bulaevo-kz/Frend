@@ -22,6 +22,10 @@ import kotlinx.coroutines.withContext
 /** Подробная правка характеристик песни: настроения галочками, жанр, энергичность, темп, описание, папки, лайк. */
 class TrackEditActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppSettings.wrap(newBase))
+    }
+
     companion object {
         const val EXTRA_TRACK_ID = "track_id"
         const val EXTRA_REVIEW = "review"

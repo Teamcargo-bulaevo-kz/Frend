@@ -63,6 +63,7 @@
     </queries>
 
     <application
+        android:name=".AssistantApp"
         android:allowBackup="true"
         android:label="Assistant"
         android:theme="@style/Theme.Assistant">

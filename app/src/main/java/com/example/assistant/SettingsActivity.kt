@@ -24,8 +24,21 @@ import com.google.android.material.switchmaterial.SwitchMaterial
  */
 class SettingsActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppSettings.wrap(newBase))
+    }
+
     private val prefs by lazy { getSharedPreferences("assistant_prefs", MODE_PRIVATE) }
     private lateinit var content: LinearLayout
+    private var fontChanged = false
+
+    override fun onStop() {
+        super.onStop()
+        if (fontChanged) {
+            fontChanged = false
+            recreate()
+        }
+    }
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -193,6 +206,19 @@ class SettingsActivity : AppCompatActivity() {
             prefs.edit().putInt("retry_wait_seconds", it).apply()
         }
 
+        addSeek("Пауза после ответа ассистента", AppSettings.int(this, AppSettings.AFTER_ANSWER_MS), " мс",
+            AppSettings.AFTER_ANSWER_MS.min, AppSettings.AFTER_ANSWER_MS.max) {
+            AppSettings.setInt(this, AppSettings.AFTER_ANSWER_MS, it)
+        }
+        addSeek("Тишина, после которой голосовой ввод заканчивается", AppSettings.int(this, AppSettings.VOICE_SILENCE_MS), " мс",
+            AppSettings.VOICE_SILENCE_MS.min, AppSettings.VOICE_SILENCE_MS.max) {
+            AppSettings.setInt(this, AppSettings.VOICE_SILENCE_MS, it)
+        }
+        addSeek("Ожидание соединения с сервером", AppSettings.int(this, AppSettings.CONNECT_TIMEOUT_S), " сек",
+            AppSettings.CONNECT_TIMEOUT_S.min, AppSettings.CONNECT_TIMEOUT_S.max) {
+            AppSettings.setInt(this, AppSettings.CONNECT_TIMEOUT_S, it)
+        }
+
         section("Внешний вид", "Изменения сохраняются на устройстве")
         addChoice("Тема приложения", arrayOf("Как в системе", "Светлая", "Тёмная"), prefs.getString("app_theme", "system") ?: "system",
             arrayOf("system", "light", "dark")) { selected ->
@@ -202,6 +228,12 @@ class SettingsActivity : AppCompatActivity() {
         }
         addSeek("Размер текста сообщений", prefs.getInt("chat_text_size", 16), " sp", 13, 23) {
             prefs.edit().putInt("chat_text_size", it).apply()
+        }
+
+        addSeek("Размер текста во всём приложении (откроется заново)", AppSettings.int(this, AppSettings.FONT_SCALE), " %",
+            AppSettings.FONT_SCALE.min, AppSettings.FONT_SCALE.max) {
+            AppSettings.setInt(this, AppSettings.FONT_SCALE, it)
+            fontChanged = true
         }
 
         section("Дополнительно", "Настройки слова активации и голоса")
@@ -214,6 +246,17 @@ class SettingsActivity : AppCompatActivity() {
         addAction("Проверить фоновый микрофон", "Запустить диагностическое прослушивание") {
             if (WakeWordService.hasMicPermission(this)) WakeWordService.test(this)
             else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        addAction("Сбросить настройки", "Вернуть значения по умолчанию (чаты, заметки и профиль не затрагиваются)") {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Сбросить настройки?")
+                .setMessage("Переключатели, громкость, время ожидания, тема и размер текста вернутся к значениям по умолчанию.")
+                .setPositiveButton("Сбросить") { _, _ ->
+                    AppSettings.resetAll(this)
+                    recreate()
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
         }
         addAction("Настройки приватности", "Разрешения для чтения экрана и истории использования") {
             AlertDialogBridge.showPrivacy(this)

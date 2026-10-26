@@ -19,6 +19,10 @@ import androidx.core.content.ContextCompat
  */
 class VoiceActivity : ComponentActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppSettings.wrap(newBase))
+    }
+
     private val voiceLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val text = if (result.resultCode == RESULT_OK) {
             result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
@@ -54,7 +58,7 @@ class VoiceActivity : ComponentActivity() {
 
     private fun startRecognition() {
         Speaker.stop()
-        val intent = VoiceInput.intent()
+        val intent = VoiceInput.intent(context = this)
         try {
             voiceLauncher.launch(intent)
         } catch (e: ActivityNotFoundException) {

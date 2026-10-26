@@ -224,7 +224,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 })
             }
         }
-        val tools = if (commandMode) Tools.subset(groups) else Tools.compact
+        val tools = AppSettings.filterTools(context, if (commandMode) Tools.subset(groups) else Tools.compact)
 
         return when (val result = client.sendConversation(
             messages, tools,

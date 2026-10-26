@@ -33,15 +33,22 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
 
     private fun promptContext(): PromptContext = appContext?.let { DeviceInfo.promptContext(it) } ?: PromptContext()
 
+    private var cachedClient: OkHttpClient? = null
+    private var cachedKey = ""
+
+    /** Клиент переиспользуется (общий пул соединений) и пересоздаётся только при смене тайм-аутов в настройках. */
     private val client: OkHttpClient
-        get() = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(
-                appContext?.getSharedPreferences("assistant_prefs", android.content.Context.MODE_PRIVATE)
-                    ?.getInt("request_timeout_seconds", 45)?.coerceIn(15, 120)?.toLong() ?: 45L,
-                TimeUnit.SECONDS
-            )
-            .build()
+        @Synchronized get() {
+            val read = appContext?.let { AppSettings.int(it, AppSettings.REQUEST_TIMEOUT_S) } ?: 45
+            val connect = appContext?.let { AppSettings.int(it, AppSettings.CONNECT_TIMEOUT_S) } ?: 30
+            val key = "$connect/$read"
+            cachedClient?.let { if (key == cachedKey) return it }
+            return OkHttpClient.Builder()
+                .connectTimeout(connect.toLong(), TimeUnit.SECONDS)
+                .readTimeout(read.toLong(), TimeUnit.SECONDS)
+                .build().also { cachedClient = it; cachedKey = key }
+        }
+
     private val model = "openai/gpt-oss-120b"
     private val endpoint = "https://api.groq.com/openai/v1/chat/completions"
 
