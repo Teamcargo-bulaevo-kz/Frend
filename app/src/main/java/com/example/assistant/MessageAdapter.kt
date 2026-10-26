@@ -152,7 +152,7 @@ class MessageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             text = sb
             setTextColor(color)
             setLinkTextColor(color)
-            textSize = 15.5f
+            textSize = context.getSharedPreferences("assistant_prefs", Context.MODE_PRIVATE).getInt("chat_text_size", 16).coerceIn(13, 23).toFloat()
             setLineSpacing(0f, 1.12f)
             setTextIsSelectable(true)
             this.maxWidth = maxWidth
