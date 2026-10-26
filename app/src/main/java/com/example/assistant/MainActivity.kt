@@ -526,7 +526,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     WakeWordService.start(this)
                 }
-            }, VoiceInput.AFTER_SPEECH_DELAY_MS)
+            }, VoiceInput.afterSpeechDelayMs(this))
         } catch (e: Exception) {
             WakeWordService.start(this)
             Toast.makeText(this, "На телефоне нет приложения для распознавания речи", Toast.LENGTH_SHORT).show()
