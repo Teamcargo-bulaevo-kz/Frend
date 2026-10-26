@@ -25,6 +25,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -96,12 +97,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val savedTheme = getSharedPreferences("assistant_prefs", MODE_PRIVATE).getString("app_theme", "system")
+        AppCompatDelegate.setDefaultNightMode(when (savedTheme) {
+            "light" -> AppCompatDelegate.MODE_NIGHT_NO
+            "dark" -> AppCompatDelegate.MODE_NIGHT_YES
+            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        })
         setContentView(R.layout.activity_main)
 
         repository = AssistantRepository(applicationContext, BuildConfig.GROQ_API_KEY)
 
         requestMediaPermissionIfNeeded()
-        AssistantService.start(this)
+        if (getSharedPreferences("assistant_prefs", MODE_PRIVATE).getBoolean("quick_access_enabled", true)) {
+            AssistantService.start(this)
+        }
 
         input = findViewById(R.id.inputField)
         sendButton = findViewById(R.id.sendButton)
@@ -115,7 +124,18 @@ class MainActivity : AppCompatActivity() {
         messageList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         messageList.adapter = adapter
 
-        findViewById<ImageButton>(R.id.attachButton).setOnClickListener { attachLauncher.launch("*/*") }
+        val settingsPrefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
+        findViewById<ImageButton>(R.id.attachButton).apply {
+            visibility = if (settingsPrefs.getBoolean("attachments_enabled", true)) View.VISIBLE else View.GONE
+            setOnClickListener { attachLauncher.launch("*/*") }
+        }
+        micButton.visibility = if (settingsPrefs.getBoolean("voice_input_enabled", true)) View.VISIBLE else View.GONE
+        findViewById<android.widget.LinearLayout>(R.id.suggestions).visibility =
+            if (settingsPrefs.getBoolean("suggestions_enabled", true)) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.allSettings).setOnClickListener {
+            drawer.closeDrawers()
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
         val speakCheck = findViewById<CompoundButton>(R.id.speakCheck)
         speakCheck.isChecked = Speaker.enabled(this)
