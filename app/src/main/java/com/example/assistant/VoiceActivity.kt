@@ -54,7 +54,7 @@ class VoiceActivity : ComponentActivity() {
 
     private fun startRecognition() {
         Speaker.stop()
-        val intent = VoiceInput.intent()
+        val intent = VoiceInput.intent(context = this)
         try {
             voiceLauncher.launch(intent)
         } catch (e: ActivityNotFoundException) {

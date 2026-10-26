@@ -154,7 +154,7 @@ class MainActivity : AppCompatActivity() {
             if (!WakeWordService.hasMicPermission(this)) {
                 wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             } else {
-                val intent = VoiceInput.intent()
+                val intent = VoiceInput.intent(context = this)
                 // Освобождаем микрофон для системного (Google) распознавания.
                 WakeWordService.pauseForSystemVoiceInput(this)
                 try {
@@ -482,7 +482,7 @@ class MainActivity : AppCompatActivity() {
         // Останавливаем озвучку и освобождаем микрофон для Google Speech Recognizer.
         Speaker.stop()
         WakeWordService.pauseForSystemVoiceInput(this)
-        val intent = VoiceInput.intent()
+        val intent = VoiceInput.intent(context = this)
         try {
             micButton.postDelayed({
                 if (!isFinishing) {

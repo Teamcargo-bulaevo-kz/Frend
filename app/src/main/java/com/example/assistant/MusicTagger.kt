@@ -100,6 +100,7 @@ object MusicTagger {
      */
     fun autoStart(context: Context) {
         if (running) return
+        if (!AppSettings.bool(context, AppSettings.AUTO_MUSIC_TAG, true)) return
         val app = context.applicationContext
         scope.launch {
             try { MusicCatalog.syncOnStart(app) } catch (e: Exception) { /* нет доступа к папке */ }

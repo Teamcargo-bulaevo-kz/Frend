@@ -42,7 +42,6 @@ class WakeWordService : Service() {
         private const val KEY = "wake_word"
         private const val KEY_PAUSED = "wake_word_paused"
         private const val KEY_PHRASE = "wake_phrase"
-        private const val COMMAND_WINDOW_MS = 10_000L
         private const val TAG = "WakeWordService"
 
         fun enabled(context: Context) =
@@ -361,7 +360,7 @@ class WakeWordService : Service() {
                 handler.postDelayed({ if (!stopped && !paused) runCommand(command) }, 180L)
             } else {
                 acquireAssistantAudioFocus()
-                awaitingUntil = System.currentTimeMillis() + COMMAND_WINDOW_MS
+                awaitingUntil = System.currentTimeMillis() + commandWindowMs()
                 if (!listeningCuePlayed) playCue(listening = true)
                 listeningCuePlayed = true
                 Speaker.speak(this, "Слушаю")
@@ -372,7 +371,7 @@ class WakeWordService : Service() {
                         listeningCuePlayed = false
                         abandonAssistantAudioFocus()
                     }
-                }, COMMAND_WINDOW_MS)
+                }, commandWindowMs())
             }
             return
         }
@@ -391,15 +390,10 @@ class WakeWordService : Service() {
      * relying on TTS alone; actual loudness still follows the phone's media volume.
      */
     private fun playCue(listening: Boolean) {
-        try {
-            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-            val type = if (listening) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_PROMPT
-            tone.startTone(type, if (listening) 180 else 260)
-            handler.postDelayed({ try { tone.release() } catch (_: Exception) {} }, 450L)
-        } catch (e: Exception) {
-            Log.w(TAG, "Не удалось проиграть звуковой сигнал", e)
-        }
+        Cues.play(this, start = listening)
     }
+
+    private fun commandWindowMs() = AppSettings.int(this, AppSettings.COMMAND_WINDOW_S) * 1000L
 
     private fun runCommand(command: String) {
         processingCommand = true
@@ -409,7 +403,7 @@ class WakeWordService : Service() {
                 processingCommand = false
                 handler.removeCallbacks(releaseFocusRunnable)
                 handler.postDelayed(releaseFocusRunnable, 15_000L)
-            }, 1800)
+            }, AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong())
         }
     }
 

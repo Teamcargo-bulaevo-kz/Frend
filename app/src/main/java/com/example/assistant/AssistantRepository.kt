@@ -111,7 +111,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             } catch (e: GroqApiException) {
                 // Короткий лимит «в минуту»: подождём и повторим один раз сами
                 val wait = if (e.code == 429) MusicTagger.retryDelayMs(e.message.orEmpty()) else null
-                if (wait == null || wait > 20_000L) throw e
+                if (wait == null || wait > AppSettings.int(context, AppSettings.RETRY_MAX_S) * 1000L) throw e
                 kotlinx.coroutines.delay(wait + 500)
                 askModel(prompt, normalized)
             }
@@ -329,6 +329,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
 
     /** Выполняет одну функцию. Никогда не бросает исключений: ошибка возвращается текстом. */
     private suspend fun execute(name: String, a: JSONObject, confirmed: Boolean = false): String {
+        // Функция выключена в настройках: не выполняем, а честно говорим об этом
+        AppSettings.blockedMessage(context, name)?.let { return it }
         val result = executeRaw(name, a, confirmed)
         if (Confirm.isAsk(result)) {
             asks.add(PendingAction(name, a))
