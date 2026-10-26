@@ -304,7 +304,7 @@ class SettingsActivity : AppCompatActivity() {
         })
         box.addView(valueLabel)
         box.addView(SeekBar(this).apply {
-            max = max - min
+            this.max = max - min
             progress = (initial.coerceIn(min, max) - min)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
