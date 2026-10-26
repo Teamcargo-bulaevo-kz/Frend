@@ -90,7 +90,7 @@ class SettingsActivity : AppCompatActivity() {
         addSwitch("Кнопка ассистента в шторке", "Постоянное уведомление с кнопками «Говорить», «Чат» и «Выкл».", prefs.getBoolean("quick_access_enabled", true)) {
             prefs.edit().putBoolean("quick_access_enabled", it).apply()
             if (it) AssistantService.start(this)
-            else stopService(Intent(this, AssistantService::class.java).setAction(AssistantService.ACTION_STOP))
+            else startService(Intent(this, AssistantService::class.java).setAction(AssistantService.ACTION_STOP))
         }
         addSwitch("Голосовой ввод в чате", "Показывать кнопку микрофона рядом с полем ввода.", prefs.getBoolean("voice_input_enabled", true)) {
             prefs.edit().putBoolean("voice_input_enabled", it).apply()
