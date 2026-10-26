@@ -42,7 +42,12 @@ class WakeWordService : Service() {
         private const val KEY = "wake_word"
         private const val KEY_PAUSED = "wake_word_paused"
         private const val KEY_PHRASE = "wake_phrase"
-        private const val COMMAND_WINDOW_MS = 10_000L
+        private const val DEFAULT_COMMAND_WINDOW_MS = 10_000L
+
+        private fun commandWindowMs(context: Context): Long =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getLong("command_window_ms", DEFAULT_COMMAND_WINDOW_MS)
+                .coerceIn(3_000L, 30_000L)
         private const val TAG = "WakeWordService"
 
         fun enabled(context: Context) =
@@ -361,7 +366,7 @@ class WakeWordService : Service() {
                 handler.postDelayed({ if (!stopped && !paused) runCommand(command) }, 180L)
             } else {
                 acquireAssistantAudioFocus()
-                awaitingUntil = System.currentTimeMillis() + COMMAND_WINDOW_MS
+                awaitingUntil = System.currentTimeMillis() + commandWindowMs(this)
                 if (!listeningCuePlayed) playCue(listening = true)
                 listeningCuePlayed = true
                 Speaker.speak(this, "Слушаю")
@@ -372,7 +377,7 @@ class WakeWordService : Service() {
                         listeningCuePlayed = false
                         abandonAssistantAudioFocus()
                     }
-                }, COMMAND_WINDOW_MS)
+                }, commandWindowMs(this))
             }
             return
         }
@@ -392,7 +397,12 @@ class WakeWordService : Service() {
      */
     private fun playCue(listening: Boolean) {
         try {
-            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+            val enabled = prefs.getBoolean(if (listening) "start_cue_enabled" else "end_cue_enabled", true)
+            if (!enabled) return
+            val volume = prefs.getInt(if (listening) "start_cue_volume" else "end_cue_volume", 70).coerceIn(0, 100)
+            if (volume == 0) return
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, volume)
             val type = if (listening) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_PROMPT
             tone.startTone(type, if (listening) 180 else 260)
             handler.postDelayed({ try { tone.release() } catch (_: Exception) {} }, 450L)
