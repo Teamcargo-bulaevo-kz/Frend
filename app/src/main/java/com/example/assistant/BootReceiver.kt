@@ -8,7 +8,9 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            AssistantService.start(context)
+            if (context.getSharedPreferences("assistant_prefs", Context.MODE_PRIVATE).getBoolean("quick_access_enabled", true)) {
+                AssistantService.start(context)
+            }
             ReminderActions.rescheduleAll(context)
             DigestActions.rescheduleAll(context)
         }
