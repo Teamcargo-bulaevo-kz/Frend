@@ -337,7 +337,11 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         return result
     }
 
-    private suspend fun executeRaw(name: String, a: JSONObject, confirmed: Boolean): String = try {
+    private suspend fun executeRaw(name: String, a: JSONObject, confirmed: Boolean): String {
+        val enabled = context.getSharedPreferences("assistant_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean("feature_$name", true)
+        if (!enabled) return "Функция «$name» отключена в настройках."
+        return try {
         when (name) {
             "set_alarm" -> PhoneActions.setAlarm(
                 context, a.optInt("hour", 0), a.optInt("minute", 0), a.optStringOrNull("label")
@@ -443,5 +447,6 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         }
     } catch (e: Exception) {
         "Не получилось выполнить «$name»: ${e.message}"
+        }
     }
 }
