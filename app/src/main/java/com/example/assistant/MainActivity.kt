@@ -240,6 +240,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (!::input.isInitialized) return
+        val prefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
+        findViewById<ImageButton>(R.id.attachButton).visibility =
+            if (prefs.getBoolean("attachments_enabled", true)) View.VISIBLE else View.GONE
+        micButton.visibility = if (prefs.getBoolean("voice_input_enabled", true)) View.VISIBLE else View.GONE
+        findViewById<android.widget.LinearLayout>(R.id.suggestions).visibility =
+            if (prefs.getBoolean("suggestions_enabled", true)) View.VISIBLE else View.GONE
+    }
+
     override fun onStart() {
         super.onStart()
         // Чат читаем заново: за время, пока приложение было свёрнуто, могли прийти голосовые команды из шторки
