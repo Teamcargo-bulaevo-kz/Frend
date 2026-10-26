@@ -38,7 +38,7 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(
                 appContext?.getSharedPreferences("assistant_prefs", android.content.Context.MODE_PRIVATE)
-                    ?.getInt("request_timeout_seconds", 45)?.coerceIn(15, 120) ?: 45,
+                    ?.getInt("request_timeout_seconds", 45)?.coerceIn(15, 120)?.toLong() ?: 45L,
                 TimeUnit.SECONDS
             )
             .build()
