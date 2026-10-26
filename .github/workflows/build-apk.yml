@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, voice-hotword-background, hotword-universal, device-info, fix-mic, chatgpt/settings-ux ]
+    branches: [ main, voice-hotword-background, hotword-universal, device-info, fix-mic, chatgpt/settings-ux, claude/settings-polish ]
   workflow_dispatch:
 
 jobs:
