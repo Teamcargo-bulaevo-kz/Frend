@@ -194,7 +194,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<TextView>(R.id.appVersion).text = "V${BuildConfig.VERSION_NAME}"
+        findViewById<TextView>(R.id.appVersion).text = "V${BuildConfig.VERSION_NAME} · ${BuildConfig.BUILD_TAG}"
 
         WakeWordService.applyPhrase(this)
         findViewById<TextView>(R.id.privacySettings).setOnClickListener {

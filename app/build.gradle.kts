@@ -18,6 +18,8 @@ android {
         versionName = "1.29"
         // Только телефонные процессоры: без x86 приложение заметно легче
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        // Метка сборки видна в приложении: ветка и короткий номер коммита (в CI берутся из GitHub)
+        buildConfigField("String", "BUILD_TAG", "\"${(System.getenv("GITHUB_REF_NAME") ?: "local").substringAfterLast('/')} ${(System.getenv("GITHUB_SHA") ?: "").take(7)}\"")
         buildConfigField("String", "GROQ_API_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")
     }
 
