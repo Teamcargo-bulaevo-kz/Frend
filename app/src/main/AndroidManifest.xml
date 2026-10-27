@@ -62,6 +62,10 @@
         <package android:name="com.whatsapp.w4b" />
     </queries>
 
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
     <application
         android:name=".AssistantApp"
         android:allowBackup="true"
@@ -196,5 +200,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>

@@ -109,5 +109,6 @@ class AssistantApp : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
         AppSettings.applyTheme(this)
+        Shell.backend = ShizukuShell
     }
 }

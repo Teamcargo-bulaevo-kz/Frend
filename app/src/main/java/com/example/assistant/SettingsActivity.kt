@@ -247,6 +247,9 @@ class SettingsActivity : AppCompatActivity() {
             if (WakeWordService.hasMicPermission(this)) WakeWordService.test(this)
             else micPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
+        addAction("Консоль (Shizuku)", "Память и процессы по приложениям. Только чтение. Статус: ${ShizukuShell.state(this).text}") {
+            showShizuku()
+        }
         addAction("Сбросить настройки", "Вернуть значения по умолчанию (чаты, заметки и профиль не затрагиваются)") {
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Сбросить настройки?")
@@ -399,6 +402,39 @@ class SettingsActivity : AppCompatActivity() {
             setTextColor(ContextCompat.getColor(context, R.color.chat_text_dim))
             setPadding(0, 0, 0, dp(6))
         })
+    }
+
+    private fun showShizuku() {
+        val on = ShizukuShell.enabled(this)
+        val state = ShizukuShell.state(this)
+        val labels = arrayOf(
+            if (on) "Выключить консоль" else "Включить консоль",
+            "Запросить разрешение у Shizuku",
+            "Открыть Shizuku"
+        )
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Консоль (Shizuku): ${state.text}")
+            .setItems(labels) { dialog, which ->
+                when (which) {
+                    0 -> {
+                        ShizukuShell.setEnabled(this, !on)
+                        recreate()
+                    }
+                    1 -> {
+                        if (!ShizukuShell.enabled(this)) ShizukuShell.setEnabled(this, true)
+                        val ok = ShizukuShell.requestPermission(this)
+                        Toast.makeText(this, if (ok) "Подтверди запрос в Shizuku и открой этот экран снова" else "Сначала запусти Shizuku", Toast.LENGTH_LONG).show()
+                    }
+                    else -> {
+                        val intent = packageManager.getLaunchIntentForPackage(ShizukuShell.PACKAGE)
+                        if (intent != null) startActivity(intent)
+                        else Toast.makeText(this, "Shizuku не установлен", Toast.LENGTH_LONG).show()
+                    }
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
     }
 
     private fun showWakePhraseDialog() {

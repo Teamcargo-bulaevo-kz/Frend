@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 30
-        versionName = "1.30"
+        versionCode = 31
+        versionName = "1.31"
         // Только телефонные процессоры: без x86 приложение заметно легче
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         // Метка сборки видна в приложении: ветка и короткий номер коммита (в CI берутся из GitHub)
@@ -69,6 +69,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("commons-io:commons-io:2.17.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
