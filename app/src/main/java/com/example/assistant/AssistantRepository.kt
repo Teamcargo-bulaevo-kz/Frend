@@ -17,13 +17,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class AssistantRepository(private val context: Context, apiKey: String) {
 
-    private companion object {
+    companion object {
         // Общие для всех экземпляров: сводку одновременно собирает только один
         val summaryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val summarizing = AtomicBoolean(false)
 
         /** Действие, которое ждёт ответа «да» или «нет»; живёт 5 минут. */
         @Volatile var pendingState: Pending? = null
+
+        /** Ждёт ли ассистент ответа «да/нет» (для голосового режима: слушать без слова активации). */
+        fun hasPendingConfirmation(): Boolean =
+            pendingState?.let { System.currentTimeMillis() - it.at < CONFIRM_TTL_MS } ?: false
         const val CONFIRM_TTL_MS = 5 * 60_000L
     }
 

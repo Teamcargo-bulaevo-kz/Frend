@@ -411,12 +411,29 @@ class WakeWordService : Service() {
         }
     }
 
+    /** Окно для ответа «да/нет» на вопрос ассистента: слово активации не нужно. */
+    private fun openConfirmWindow() {
+        acquireAssistantAudioFocus()
+        awaitingUntil = System.currentTimeMillis() + commandWindowMs(this)
+        playCue(listening = true)
+        listeningCuePlayed = true
+        val expectedEnd = awaitingUntil
+        handler.postDelayed({
+            if (!stopped && awaitingUntil == expectedEnd) {
+                awaitingUntil = 0L
+                listeningCuePlayed = false
+            }
+        }, commandWindowMs(this))
+    }
+
     private fun runCommand(command: String) {
         processingCommand = true
         AssistantRunner.process(this, command) { answer ->
             AssistantService.showResult(applicationContext, command, answer)
             handler.postDelayed({
                 processingCommand = false
+                // Ассистент задал вопрос «да или нет» — слушаем ответ без слова активации
+                if (AssistantRepository.hasPendingConfirmation()) openConfirmWindow()
                 handler.removeCallbacks(releaseFocusRunnable)
                 handler.postDelayed(releaseFocusRunnable, 15_000L)
             }, AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong())
