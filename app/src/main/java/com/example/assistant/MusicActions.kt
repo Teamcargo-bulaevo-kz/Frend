@@ -14,10 +14,24 @@ object MusicActions {
     private const val NO_ACCESS =
         "Не вижу музыку на телефоне. Разреши доступ к аудио в настройках приложения Assistant"
 
+    /**
+     * Музыка стартует после того, как ассистент коротко назвал трек: сначала голос, потом музыка.
+     * Если озвучки нет, начинаем почти сразу (через 0,7 с), максимум ждём 15 секунд.
+     */
     private fun startPlayback(context: Context, tracks: List<MusicTrack>) {
         MusicQueue.tracks = tracks
-        val intent = Intent(context, MusicService::class.java).setAction(MusicService.ACTION_PLAY)
-        ContextCompat.startForegroundService(context, intent)
+        val app = context.applicationContext
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val began = System.currentTimeMillis()
+        val check = object : Runnable {
+            override fun run() {
+                if (System.currentTimeMillis() - began > 15_000L || !Speaker.isBusy()) {
+                    val intent = Intent(app, MusicService::class.java).setAction(MusicService.ACTION_PLAY)
+                    ContextCompat.startForegroundService(app, intent)
+                } else handler.postDelayed(this, 250L)
+            }
+        }
+        handler.postDelayed(check, 700L)
     }
 
     // ---------------------------------------------------------------- воспроизведение
@@ -39,7 +53,7 @@ object MusicActions {
         val tracks = if (shuffle || blank) pool.shuffled().take(300) else pool
         startPlayback(context, tracks)
         val first = tracks.first()
-        val name = if (first.artist.isBlank()) first.title else "${first.artist} — ${first.title}"
+        val name = SpeechText.shortTitle(first.title)
         return if (tracks.size > 1) "Включаю «$name», дальше ещё ${tracks.size - 1}" else "Включаю «$name»"
     }
 
@@ -59,7 +73,7 @@ object MusicActions {
         val tracks = found.shuffled().take(300)
         startPlayback(context, tracks)
         val first = tracks.first()
-        val name = if (first.artist.isBlank()) first.title else "${first.artist} — ${first.title}"
+        val name = SpeechText.shortTitle(first.title)
         return "Включаю подборку ($label): «$name», всего ${tracks.size}"
     }
 
@@ -76,7 +90,7 @@ object MusicActions {
         val tracks = liked.shuffled().take(300)
         startPlayback(context, tracks)
         val first = tracks.first()
-        return "Включаю любимое: «${if (first.artist.isBlank()) first.title else first.artist + " — " + first.title}», всего ${tracks.size}"
+        return "Включаю любимое: «${SpeechText.shortTitle(first.title)}», всего ${tracks.size}"
     }
 
     private fun nameOf(t: MusicTrack) = if (t.artist.isBlank()) t.title else "${t.artist} — ${t.title}"

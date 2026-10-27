@@ -47,5 +47,16 @@ object SpeechText {
         return if (hadCode && !out.contains("Код показан")) "$out Код показан на экране." else "$out Подробности на экране."
     }
 
+    /** Короткое название трека для голоса: без скобок, хвостов вроде «Official Video» и не длиннее ~40 символов. */
+    fun shortTitle(title: String, limit: Int = 40): String {
+        var t = title.replace(Regex("""\s*[(\[{][^)\]}]*[)\]}]"""), " ")
+        t = t.replace(Regex("""(?i)\s*[-–—|]\s*(official|lyrics?|audio|video|clip|клип|текст|премьера|hd|hq|remix).*$"""), "")
+        t = t.replace(Regex("""\s+"""), " ").trim()
+        if (t.isEmpty()) t = title.trim()
+        if (t.length <= limit) return t
+        val cut = t.take(limit)
+        return cut.substringBeforeLast(' ', cut).trimEnd(',', '.', '-', ' ')
+    }
+
     private const val BRIEF_LIMIT = 260
 }

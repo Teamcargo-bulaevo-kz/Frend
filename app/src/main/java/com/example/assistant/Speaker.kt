@@ -21,6 +21,21 @@ object Speaker {
     @Volatile private var ready = false
     private val waiting = ArrayList<(TextToSpeech) -> Unit>()
 
+    /** Идёт ли озвучка. Пока ассистент говорит (и ещё чуть-чуть после), микрофон слова активации ничего не слушает. */
+    @Volatile private var speakingSince = 0L
+    @Volatile private var lastEnd = 0L
+    private const val TAIL_MS = 700L
+    private const val MAX_SPEECH_MS = 60_000L
+
+    fun isBusy(): Boolean {
+        val now = System.currentTimeMillis()
+        if (speakingSince != 0L && now - speakingSince < MAX_SPEECH_MS) return true
+        return now - lastEnd < TAIL_MS
+    }
+
+    private fun markStart() { speakingSince = System.currentTimeMillis() }
+    private fun markEnd() { speakingSince = 0L; lastEnd = System.currentTimeMillis() }
+
     fun enabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
 
@@ -66,6 +81,13 @@ object Speaker {
                         created.setLanguage(Locale.getDefault())
                     }
                     applySettings(app, created)
+                    created.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) { markStart() }
+                        override fun onDone(utteranceId: String?) { markEnd() }
+                        @Deprecated("Deprecated in Java")
+                        override fun onError(utteranceId: String?) { markEnd() }
+                        override fun onStop(utteranceId: String?, interrupted: Boolean) { markEnd() }
+                    })
                     ready = true
                     val todo = ArrayList(waiting)
                     waiting.clear()
@@ -116,6 +138,7 @@ object Speaker {
     fun speak(context: Context, text: String) {
         val spoken = if (brief(context)) SpeechText.brief(text) else clean(text)
         if (spoken.isEmpty()) return
+        markStart()
         ensure(context) { it.speak(spoken, TextToSpeech.QUEUE_FLUSH, Bundle(), "assistant") }
     }
 
@@ -127,6 +150,7 @@ object Speaker {
 
     @Synchronized
     fun stop() {
+        markEnd()
         tts?.stop()
         waiting.clear()
     }

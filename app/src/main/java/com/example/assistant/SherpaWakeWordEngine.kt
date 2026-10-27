@@ -147,6 +147,7 @@ class SherpaWakeWordEngine(context: Context) {
                 onStatus("Микрофон активен ($sourceName, $captureRate Гц). Ожидаю слово «${WakeWordService.phraseTitle(appContext)}»…")
                 var wakeWordPartialSent = false
                 var lastPartial = ""
+                var mutedBySpeech = false
                 var framesSinceLevel = 0
                 val pcm = ShortArray(AudioResampler.frameSamples(captureRate))
 
@@ -160,6 +161,17 @@ class SherpaWakeWordEngine(context: Context) {
                         val level = if (n > 0) ((sum.toDouble() / n / 32768.0) * 100.0).toInt().coerceIn(0, 100) else 0
                         onAudioLevel(level)
                         framesSinceLevel = 0
+                    }
+                    // Пока говорит сам ассистент, его голос не должен попасть в распознавание
+                    if (Speaker.isBusy()) {
+                        mutedBySpeech = true
+                        continue
+                    }
+                    if (mutedBySpeech) {
+                        mutedBySpeech = false
+                        r.reset(s)
+                        lastPartial = ""
+                        wakeWordPartialSent = false
                     }
                     val floats = AudioResampler.toModel(pcm, n, captureRate)
                     if (floats.isNotEmpty()) s.acceptWaveform(floats, SAMPLE_RATE)

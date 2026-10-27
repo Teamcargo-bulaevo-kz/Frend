@@ -411,6 +411,12 @@ class WakeWordService : Service() {
         }
     }
 
+    private fun runWhenQuiet(waitedMs: Long = 0L, block: () -> Unit) {
+        if (stopped) return
+        if (!Speaker.isBusy() || waitedMs > 60_000L) block()
+        else handler.postDelayed({ runWhenQuiet(waitedMs + 250L, block) }, 250L)
+    }
+
     /** Окно для ответа «да/нет» на вопрос ассистента: слово активации не нужно. */
     private fun openConfirmWindow() {
         acquireAssistantAudioFocus()
@@ -431,11 +437,14 @@ class WakeWordService : Service() {
         AssistantRunner.process(this, command) { answer ->
             AssistantService.showResult(applicationContext, command, answer)
             handler.postDelayed({
-                processingCommand = false
-                // Ассистент задал вопрос «да или нет» — слушаем ответ без слова активации
-                if (AssistantRepository.hasPendingConfirmation()) openConfirmWindow()
-                handler.removeCallbacks(releaseFocusRunnable)
-                handler.postDelayed(releaseFocusRunnable, 15_000L)
+                // Ждём, пока ассистент договорит, и только потом снова слушаем
+                runWhenQuiet {
+                    processingCommand = false
+                    // Ассистент задал вопрос «да или нет» — слушаем ответ без слова активации
+                    if (AssistantRepository.hasPendingConfirmation()) openConfirmWindow()
+                    handler.removeCallbacks(releaseFocusRunnable)
+                    handler.postDelayed(releaseFocusRunnable, 15_000L)
+                }
             }, AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong())
         }
     }
