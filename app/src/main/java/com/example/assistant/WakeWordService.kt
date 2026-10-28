@@ -312,6 +312,7 @@ class WakeWordService : Service() {
 
     private fun handleText(text: String) {
         if (stopped || paused || text.isBlank()) return
+        if (ListenLog.allEnabled(this)) ListenLog.add(this, "услышал", text)
         if (diagnosticMode) {
             diagnosticMode = false
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -357,6 +358,7 @@ class WakeWordService : Service() {
 
         val command = WakeWord.commandAfter(text)
         if (command != null) {
+            ListenLog.add(this, if (command.isBlank()) "слово активации" else "команда после слова", text)
             acquireAssistantAudioFocus()
             if (command.isNotBlank()) {
                 // If interim recognition did not catch the keyword, still confirm before acting.
@@ -385,6 +387,7 @@ class WakeWordService : Service() {
         }
 
         if (System.currentTimeMillis() < awaitingUntil) {
+            ListenLog.add(this, "команда в окне", text)
             awaitingUntil = 0L
             listeningCuePlayed = false
             acquireAssistantAudioFocus()

@@ -253,6 +253,22 @@ class SettingsActivity : AppCompatActivity() {
         addAction("Голос и скорость озвучки", "Выбор установленного голоса и темпа речи") {
             showVoiceSettings()
         }
+        addSwitch("Записывать всё услышанное (для отладки)", "Только на телефоне. Помогает найти, что именно распознаётся неверно. Выключи, когда не нужно.",
+            ListenLog.allEnabled(this)) { ListenLog.setAllEnabled(this, it) }
+        addAction("Журнал слушания", "Что услышал ассистент и что сделал: слово активации, команды") {
+            val text = ListenLog.recent(this)
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Журнал слушания")
+                .setMessage(text)
+                .setPositiveButton("Копировать") { _, _ ->
+                    val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("listen_log", text))
+                    Toast.makeText(this, "Скопировано", Toast.LENGTH_SHORT).show()
+                }
+                .setNeutralButton("Очистить") { _, _ -> ListenLog.clear(this) }
+                .setNegativeButton("Закрыть", null)
+                .show()
+        }
         addAction("Проверить фоновый микрофон", "Запустить диагностическое прослушивание") {
             if (WakeWordService.hasMicPermission(this)) WakeWordService.test(this)
             else micPermission.launch(Manifest.permission.RECORD_AUDIO)
