@@ -30,7 +30,7 @@ object Shell {
     @Volatile var backend: ShellBackend = NoShell
 
     fun available(context: Context) = backend.available(context)
-    fun run(command: String) = backend.run(command)
+    fun run(command: String, timeoutMs: Long = 25_000L) = backend.run(command, timeoutMs)
 }
 
 /** Память одного процесса из `dumpsys meminfo` (раздел «Total PSS by process»). */

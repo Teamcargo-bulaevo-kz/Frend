@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import rikka.shizuku.Shizuku
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.TimeUnit
 
 /**
  * Какие команды разрешено отдавать консоли. Только чтение: без `;`, `&`, `|`, `>`, подстановок и переводов строки,
@@ -131,10 +130,18 @@ object ShizukuShell : ShellBackend {
                 } catch (_: Exception) {}
             }
             reader.start()
-            val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
-            if (!finished) process.destroy()
-            reader.join(1000)
-            ShellResult(finished, out.toString("UTF-8"))
+            // Вывод читается до конца потока (процесс закончился). waitFor(timeout) у удалённого процесса Shizuku
+            // бросает «process hasn't exited», поэтому ждём чтением и сами опрашиваем exitValue().
+            reader.join(timeoutMs)
+            val timedOut = reader.isAlive
+            if (timedOut) { try { process.destroy() } catch (_: Throwable) {}; reader.join(1000) }
+            var exit: Int? = null
+            val deadline = System.currentTimeMillis() + 2000L
+            while (exit == null && System.currentTimeMillis() < deadline) {
+                try { exit = process.exitValue() } catch (_: IllegalThreadStateException) { Thread.sleep(50) }
+            }
+            val text = out.toString("UTF-8")
+            ShellResult(!timedOut && (exit == 0 || text.isNotBlank()), if (timedOut && text.isBlank()) "Команда не завершилась за ${timeoutMs / 1000} с" else text)
         } catch (e: Throwable) {
             ShellResult(false, e.message ?: e.javaClass.simpleName)
         }
