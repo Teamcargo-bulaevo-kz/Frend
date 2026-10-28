@@ -219,6 +219,16 @@ class SettingsActivity : AppCompatActivity() {
             AppSettings.setInt(this, AppSettings.CONNECT_TIMEOUT_S, it)
         }
 
+        section("Микрофон", "Чтобы ассистент слышал тихо и шёпотом. Применяется при следующем запуске слушания (выключи и включи «Фоновое слово активации»)")
+        addSwitch("Режим шёпота", "Тихая речь усиливается автоматически, шум и тишина — нет. Возможны ложные срабатывания в шумном месте.",
+            AppSettings.bool(this, AppSettings.WHISPER, false)) {
+            getSharedPreferences(AppSettings.PREFS, MODE_PRIVATE).edit().putBoolean(AppSettings.WHISPER, it).apply()
+        }
+        addSeek("Усиление микрофона (1 = без усиления)", AppSettings.int(this, AppSettings.MIC_GAIN), " ×",
+            AppSettings.MIC_GAIN.min, AppSettings.MIC_GAIN.max) {
+            AppSettings.setInt(this, AppSettings.MIC_GAIN, it)
+        }
+
         section("Внешний вид", "Изменения сохраняются на устройстве")
         addChoice("Тема приложения", arrayOf("Как в системе", "Светлая", "Тёмная"), prefs.getString("app_theme", "system") ?: "system",
             arrayOf("system", "light", "dark")) { selected ->

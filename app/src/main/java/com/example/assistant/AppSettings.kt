@@ -32,6 +32,14 @@ object AppSettings {
     /** Сколько тишины считать концом фразы при голосовом вводе. */
     val VOICE_SILENCE_MS = IntSpec("voice_silence_ms", 1800, 800, 3500)
 
+    /** Постоянное усиление микрофона для распознавания (1 = без усиления). */
+    val MIC_GAIN = IntSpec("mic_gain", 1, 1, 12)
+    /** Режим шёпота: тихая речь подтягивается автоматически. */
+    const val WHISPER = "whisper_mode"
+
+    /** Во сколько раз максимум усиливать тихую речь (шёпот). 1 — без усиления. */
+    val MIC_GAIN_MAX = IntSpec("mic_gain_max", 12, 1, 30)
+
     val CHAT_TEXT_SP = IntSpec("chat_text_size", 16, 13, 23)
     /** Масштаб текста всего приложения, в процентах. */
     val FONT_SCALE = IntSpec("ui_font_scale", 100, 80, 140)
@@ -95,9 +103,9 @@ object AppSettings {
         val editor = p.edit()
         listOf(
             CUE_START_VOLUME, CUE_END_VOLUME, REQUEST_TIMEOUT_S, CONNECT_TIMEOUT_S, RETRY_WAIT_S,
-            VOICE_DELAY_MS, AFTER_ANSWER_MS, VOICE_SILENCE_MS, CHAT_TEXT_SP, FONT_SCALE
+            VOICE_DELAY_MS, AFTER_ANSWER_MS, VOICE_SILENCE_MS, CHAT_TEXT_SP, FONT_SCALE, MIC_GAIN
         ).forEach { editor.remove(it.key) }
-        editor.remove(CUE_START_ON).remove(CUE_END_ON).remove(THEME).remove("command_window_ms")
+        editor.remove(WHISPER).remove(CUE_START_ON).remove(CUE_END_ON).remove(THEME).remove("command_window_ms")
         p.all.keys.filter { it.startsWith("feature_") }.forEach { editor.remove(it) }
         editor.apply()
         applyTheme(context)

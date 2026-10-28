@@ -148,6 +148,10 @@ class SherpaWakeWordEngine(context: Context) {
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var mutedBySpeech = false
+                val gain = MicGain(
+                    AppSettings.int(appContext, AppSettings.MIC_GAIN).toFloat(),
+                    AppSettings.bool(appContext, AppSettings.WHISPER, false)
+                )
                 var framesSinceLevel = 0
                 val pcm = ShortArray(AudioResampler.frameSamples(captureRate))
 
@@ -174,6 +178,7 @@ class SherpaWakeWordEngine(context: Context) {
                         wakeWordPartialSent = false
                     }
                     val floats = AudioResampler.toModel(pcm, n, captureRate)
+                    gain.process(floats)
                     if (floats.isNotEmpty()) s.acceptWaveform(floats, SAMPLE_RATE)
                     while (r.isReady(s)) r.decode(s)
                     // Streaming recognizers can identify the wake word before an endpoint.
