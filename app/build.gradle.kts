@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 36
-        versionName = "1.36"
+        versionCode = 37
+        versionName = "1.37"
         // Только телефонные процессоры: без x86 приложение заметно легче
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         // Метка сборки видна в приложении: ветка и короткий номер коммита (в CI берутся из GitHub)

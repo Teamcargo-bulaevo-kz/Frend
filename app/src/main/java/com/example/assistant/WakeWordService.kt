@@ -369,7 +369,9 @@ class WakeWordService : Service() {
                 awaitingUntil = System.currentTimeMillis() + commandWindowMs(this)
                 if (!listeningCuePlayed) playCue(listening = true)
                 listeningCuePlayed = true
-                Speaker.speak(this, "Слушаю")
+                // В режиме шёпота голосовое «Слушаю» не произносим: пока ассистент говорит, микрофон закрыт,
+                // и тихое начало команды терялось. Остаётся звуковой сигнал.
+                if (!AppSettings.bool(this, AppSettings.WHISPER, true)) Speaker.speak(this, "Слушаю")
                 val expectedEnd = awaitingUntil
                 handler.postDelayed({
                     if (!stopped && awaitingUntil == expectedEnd) {

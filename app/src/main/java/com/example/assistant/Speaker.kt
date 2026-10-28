@@ -24,7 +24,7 @@ object Speaker {
     /** Идёт ли озвучка. Пока ассистент говорит (и ещё чуть-чуть после), микрофон слова активации ничего не слушает. */
     @Volatile private var speakingSince = 0L
     @Volatile private var lastEnd = 0L
-    private const val TAIL_MS = 700L
+    private const val TAIL_MS = 400L
     private const val MAX_SPEECH_MS = 60_000L
 
     fun isBusy(): Boolean {
