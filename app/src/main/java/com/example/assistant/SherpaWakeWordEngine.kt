@@ -132,7 +132,8 @@ class SherpaWakeWordEngine(context: Context) {
                     Log.w(TAG, "Echo cancellation is unavailable", e)
                 }
                 try {
-                    if (NoiseSuppressor.isAvailable()) {
+                    // Шумоподавитель телефона вырезает шёпот, поэтому в режиме шёпота он выключен
+                    if (NoiseSuppressor.isAvailable() && !AppSettings.bool(appContext, AppSettings.WHISPER, true)) {
                         noiseSuppressor = NoiseSuppressor.create(mic.audioSessionId)?.apply { enabled = true }
                     }
                 } catch (e: Exception) {
@@ -150,7 +151,7 @@ class SherpaWakeWordEngine(context: Context) {
                 var mutedBySpeech = false
                 val gain = MicGain(
                     AppSettings.int(appContext, AppSettings.MIC_GAIN).toFloat(),
-                    AppSettings.bool(appContext, AppSettings.WHISPER, false)
+                    AppSettings.bool(appContext, AppSettings.WHISPER, true)
                 )
                 var framesSinceLevel = 0
                 val pcm = ShortArray(AudioResampler.frameSamples(captureRate))

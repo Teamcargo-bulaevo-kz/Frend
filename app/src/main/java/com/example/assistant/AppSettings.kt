@@ -37,9 +37,6 @@ object AppSettings {
     /** Режим шёпота: тихая речь подтягивается автоматически. */
     const val WHISPER = "whisper_mode"
 
-    /** Во сколько раз максимум усиливать тихую речь (шёпот). 1 — без усиления. */
-    val MIC_GAIN_MAX = IntSpec("mic_gain_max", 12, 1, 30)
-
     val CHAT_TEXT_SP = IntSpec("chat_text_size", 16, 13, 23)
     /** Масштаб текста всего приложения, в процентах. */
     val FONT_SCALE = IntSpec("ui_font_scale", 100, 80, 140)

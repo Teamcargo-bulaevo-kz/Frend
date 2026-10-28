@@ -4,37 +4,38 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
- * Автоусиление микрофона для шёпота: подтягивает тихую речь к рабочему уровню, но не больше [maxGain] раз.
- * Громкая речь не усиливается (усиление не меньше 1) и не клипуется. Чистый Kotlin, без Android.
+ * Усиление микрофона перед распознаванием. [fixedGain] — постоянное усиление (1 = без него).
+ * В режиме шёпота [whisper] дополнительно включается автоусиление: тихая речь подтягивается к рабочему уровню
+ * (не больше чем в [whisperMax] раз), громкая не усиливается. Отсчёты в диапазоне -1..1, с ограничением от клиппинга.
+ * Чистый Kotlin, без Android.
  */
-class MicGain(private val maxGain: () -> Int) {
+class MicGain(private val fixedGain: Float, private val whisper: Boolean, private val whisperMax: Float = 30f) {
 
     private var level = 0.0
-    private var gain = 1.0
+    private var auto = 1.0
 
-    /** Текущее усиление (для диагностики и тестов). */
-    val currentGain: Double get() = gain
+    /** Текущее автоусиление (для диагностики и тестов). */
+    val currentAutoGain: Double get() = auto
 
-    /** Усиливает первые [n] отсчётов на месте. */
-    fun process(pcm: ShortArray, n: Int) {
-        if (n <= 0) return
-        var sum = 0.0
-        for (i in 0 until n) { val v = pcm[i].toDouble(); sum += v * v }
-        val rms = sqrt(sum / n)
-        // Оценка уровня: быстро растёт при громких звуках, медленно падает в тишине
-        level = if (rms > level) level * 0.7 + rms * 0.3 else level * 0.98 + rms * 0.02
-        val limit = maxGain().coerceIn(1, 30).toDouble()
-        val desired = (TARGET / max(level, FLOOR)).coerceIn(1.0, limit)
-        // Усиление падает сразу (чтобы не оглушить), растёт плавно
-        gain = if (desired < gain) desired else gain + (desired - gain) * 0.15
-        if (gain <= 1.001) return
-        for (i in 0 until n) {
-            pcm[i] = (pcm[i] * gain).toInt().coerceIn(-32768, 32767).toShort()
+    fun process(samples: FloatArray) {
+        if (samples.isEmpty()) return
+        if (whisper) {
+            var sum = 0.0
+            for (v in samples) sum += v.toDouble() * v
+            val rms = sqrt(sum / samples.size)
+            // Оценка уровня: быстро растёт при громких звуках, медленно падает в тишине
+            level = if (rms > level) level * 0.7 + rms * 0.3 else level * 0.98 + rms * 0.02
+            val desired = (TARGET / max(level, FLOOR)).coerceIn(1.0, whisperMax.toDouble().coerceAtLeast(1.0))
+            // Усиление падает сразу (чтобы не оглушить), растёт плавно
+            auto = if (desired < auto) desired else auto + (desired - auto) * 0.15
         }
+        val total = (fixedGain.toDouble().coerceAtLeast(1.0) * auto).toFloat()
+        if (total <= 1.001f) return
+        for (i in samples.indices) samples[i] = (samples[i] * total).coerceIn(-1f, 1f)
     }
 
     private companion object {
-        const val TARGET = 3000.0
-        const val FLOOR = 25.0
+        const val TARGET = 0.09   // ≈ 3000 из 32768
+        const val FLOOR = 0.00076 // ≈ 25 из 32768: тише считаем тишиной
     }
 }

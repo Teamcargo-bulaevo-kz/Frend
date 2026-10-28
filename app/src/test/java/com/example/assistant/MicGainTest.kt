@@ -6,34 +6,41 @@ import org.junit.Test
 import kotlin.math.abs
 
 class MicGainTest {
-    private fun frame(amp: Int) = ShortArray(800) { i -> if (i % 2 == 0) amp.toShort() else (-amp).toShort() }
-    private fun peak(p: ShortArray) = p.maxOf { abs(it.toInt()) }
+    private fun frame(amp: Float) = FloatArray(800) { i -> if (i % 2 == 0) amp else -amp }
+    private fun peak(f: FloatArray) = f.maxOf { abs(it) }
 
-    @Test fun quietSpeechIsAmplified() {
-        val g = MicGain { 20 }
-        var last = frame(150)
-        repeat(60) { last = frame(150); g.process(last, last.size) }
-        assertTrue("peak=${peak(last)}", peak(last) > 1500)
-        assertTrue(g.currentGain <= 20.0)
+    @Test fun whisperIsAmplified() {
+        val g = MicGain(1f, true)
+        var last = frame(0.005f)
+        repeat(80) { last = frame(0.005f); g.process(last) }
+        assertTrue("peak=${peak(last)}", peak(last) > 0.05f)
+        assertTrue(g.currentAutoGain <= 30.0)
     }
 
-    @Test fun loudSpeechIsNotAmplifiedNorClipped() {
-        val g = MicGain { 20 }
-        val f = frame(12000)
-        g.process(f, f.size)
-        assertEquals(12000, peak(f))
+    @Test fun loudSpeechIsNotAmplified() {
+        val g = MicGain(1f, true)
+        val f = frame(0.4f)
+        g.process(f)
+        assertEquals(0.4f, peak(f), 1e-6f)
     }
 
-    @Test fun gainNeverExceedsLimit() {
-        val g = MicGain { 5 }
-        repeat(100) { val f = frame(40); g.process(f, f.size) }
-        assertTrue(g.currentGain <= 5.0 + 1e-9)
+    @Test fun autoGainRespectsLimit() {
+        val g = MicGain(1f, true, 5f)
+        repeat(100) { g.process(frame(0.001f)) }
+        assertTrue(g.currentAutoGain <= 5.0 + 1e-9)
     }
 
-    @Test fun limitOneMeansNoChange() {
-        val g = MicGain { 1 }
-        val f = frame(100)
-        g.process(f, f.size)
-        assertEquals(100, peak(f))
+    @Test fun fixedGainClipsAtOne() {
+        val g = MicGain(4f, false)
+        val f = frame(0.5f)
+        g.process(f)
+        assertEquals(1f, peak(f), 1e-6f)
+    }
+
+    @Test fun noGainMeansNoChange() {
+        val g = MicGain(1f, false)
+        val f = frame(0.1f)
+        g.process(f)
+        assertEquals(0.1f, peak(f), 1e-6f)
     }
 }
