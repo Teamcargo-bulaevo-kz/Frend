@@ -420,7 +420,8 @@ class SettingsActivity : AppCompatActivity() {
         val labels = arrayOf(
             if (on) "Выключить консоль" else "Включить консоль",
             "Запросить разрешение у Shizuku",
-            "Открыть Shizuku"
+            "Открыть Shizuku",
+            "Проверить консоль (покажет точную причину)"
         )
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Консоль (Shizuku): ${state.text}")
@@ -434,6 +435,14 @@ class SettingsActivity : AppCompatActivity() {
                         if (!ShizukuShell.enabled(this)) ShizukuShell.setEnabled(this, true)
                         val ok = ShizukuShell.requestPermission(this)
                         Toast.makeText(this, if (ok) "Подтверди запрос в Shizuku и открой этот экран снова" else "Сначала запусти Shizuku", Toast.LENGTH_LONG).show()
+                    }
+                    3 -> {
+                        val report = ShizukuShell.selfTest(this)
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("Проверка консоли")
+                            .setMessage(report)
+                            .setPositiveButton("Ок", null)
+                            .show()
                     }
                     else -> {
                         val intent = packageManager.getLaunchIntentForPackage(ShizukuShell.PACKAGE)

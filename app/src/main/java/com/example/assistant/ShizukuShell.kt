@@ -88,6 +88,24 @@ object ShizukuShell : ShellBackend {
         } else false
     } catch (e: Throwable) { false }
 
+    /** Пошаговая проверка для экрана настроек: что именно не так (выключено, не запущен, нет разрешения, ошибка команды). */
+    fun selfTest(context: Context): String {
+        val sb = StringBuilder()
+        sb.append("1. Консоль включена в настройках: ").append(if (enabled(context)) "да" else "НЕТ — включи").append('\n')
+        sb.append("2. Приложение Shizuku установлено: ").append(if (installed(context)) "да" else "НЕТ").append('\n')
+        val running = try { Shizuku.pingBinder() } catch (e: Throwable) { false }
+        sb.append("3. Shizuku запущен: ").append(if (running) "да" else "НЕТ — открой Shizuku и нажми «Запустить»").append('\n')
+        if (!running) return sb.toString()
+        val granted = try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (e: Throwable) { false }
+        sb.append("4. Разрешение для Assistant: ").append(if (granted) "есть" else "НЕТ — нажми «Запросить разрешение»").append('\n')
+        if (!granted) return sb.toString()
+        val result = run("dumpsys battery", 8000)
+        sb.append("5. Тестовая команда: ")
+        if (result.ok && result.output.isNotBlank()) sb.append("работает (получено ${result.output.length} символов)")
+        else sb.append("ОШИБКА: ").append(result.output.take(200).ifBlank { "нет ответа" })
+        return sb.toString()
+    }
+
     override fun available(context: Context) = state(context) == ShizukuState.READY
 
     override fun run(command: String, timeoutMs: Long): ShellResult {
