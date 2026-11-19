@@ -125,6 +125,10 @@ class WakeWordService : Service() {
     @Volatile private var listeningCuePlayed = false
     @Volatile private var diagnosticMode = false
     @Volatile private var paused = false
+    /** Начало команды, оборванной паузой: ждём продолжение (см. CommandAssembler). */
+    private var pendingCommand = ""
+    private var pendingParts = 0
+    private var pendingGeneration = 0
     private var cpuWakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -143,6 +147,7 @@ class WakeWordService : Service() {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_PAUSED, true).apply()
             awaitingUntil = 0L
             listeningCuePlayed = false
+            clearPending()
             engine?.stop()
             engine = null
             try { if (cpuWakeLock?.isHeld == true) cpuWakeLock?.release() } catch (_: Exception) {}
@@ -155,6 +160,7 @@ class WakeWordService : Service() {
             awaitingUntil = 0L
             listeningCuePlayed = false
             processingCommand = false
+            clearPending()
             AssistantRunner.cancel()
             Speaker.stop()
             handler.removeCallbacks(releaseFocusRunnable)
@@ -204,6 +210,8 @@ class WakeWordService : Service() {
                     handler.post {
                         if (stopped || paused || text.isBlank()) return@post
                         if (diagnosticMode) updateDiagnosticNotification("Распознаю: ${text.take(150)}")
+                        // Пользователь договаривает оборванную команду: продлеваем ожидание
+                        if (pendingCommand.isNotEmpty() && !processingCommand) armContinuation()
                         // Give immediate feedback as soon as an interim hypothesis contains the wake word.
                         if (!diagnosticMode && !listeningCuePlayed && WakeWord.commandAfter(text) != null) {
                             listeningCuePlayed = true
@@ -360,12 +368,12 @@ class WakeWordService : Service() {
         if (command != null) {
             ListenLog.add(this, if (command.isBlank()) "слово активации" else "команда после слова", text)
             acquireAssistantAudioFocus()
+            // Новое слово активации начинает команду заново
+            clearPending()
             if (command.isNotBlank()) {
                 // If interim recognition did not catch the keyword, still confirm before acting.
                 if (!listeningCuePlayed) playCue(listening = true)
-                listeningCuePlayed = false
-                playCue(listening = false)
-                handler.postDelayed({ if (!stopped && !paused) runCommand(command) }, 180L)
+                dispatchCommand(command)
             } else {
                 acquireAssistantAudioFocus()
                 awaitingUntil = System.currentTimeMillis() + commandWindowMs(this)
@@ -387,13 +395,57 @@ class WakeWordService : Service() {
         }
 
         if (System.currentTimeMillis() < awaitingUntil) {
-            ListenLog.add(this, "команда в окне", text)
+            ListenLog.add(this, if (pendingCommand.isEmpty()) "команда в окне" else "продолжение команды", text)
+            awaitingUntil = 0L
+            acquireAssistantAudioFocus()
+            dispatchCommand(text)
+        }
+    }
+
+    /**
+     * Кусок команды. Законченную команду выполняем сразу. Если она оборвана паузой («поставь…», «напомни мне…»),
+     * ждём продолжение [CommandAssembler.CONTINUE_MS] без слова активации и склеиваем куски.
+     */
+    private fun dispatchCommand(part: String) {
+        val full = CommandAssembler.join(pendingCommand, part)
+        val parts = pendingParts + 1
+        if (parts < CommandAssembler.MAX_PARTS && CommandAssembler.looksIncomplete(full)) {
+            pendingCommand = full
+            pendingParts = parts
+            ListenLog.add(this, "жду продолжение", full)
+            acquireAssistantAudioFocus()
+            listeningCuePlayed = true
+            armContinuation()
+            return
+        }
+        if (pendingParts > 0) ListenLog.add(this, "команда из частей", full)
+        clearPending()
+        awaitingUntil = 0L
+        listeningCuePlayed = false
+        playCue(listening = false)
+        handler.postDelayed({ if (!stopped && !paused) runCommand(full) }, 180L)
+    }
+
+    /** (Пере)запускает ожидание продолжения; если его нет — выполняем то, что услышали, модель переспросит. */
+    private fun armContinuation() {
+        val generation = ++pendingGeneration
+        awaitingUntil = System.currentTimeMillis() + CommandAssembler.CONTINUE_MS
+        handler.postDelayed({
+            if (stopped || paused || generation != pendingGeneration || pendingCommand.isEmpty()) return@postDelayed
+            val command = pendingCommand
+            ListenLog.add(this, "продолжения нет", command)
+            clearPending()
             awaitingUntil = 0L
             listeningCuePlayed = false
-            acquireAssistantAudioFocus()
             playCue(listening = false)
-            handler.postDelayed({ if (!stopped && !paused) runCommand(text) }, 180L)
-        }
+            runCommand(command)
+        }, CommandAssembler.CONTINUE_MS)
+    }
+
+    private fun clearPending() {
+        pendingCommand = ""
+        pendingParts = 0
+        pendingGeneration++
     }
 
     /**

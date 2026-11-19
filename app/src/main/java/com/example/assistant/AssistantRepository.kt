@@ -65,7 +65,10 @@ class AssistantRepository(private val context: Context, apiKey: String) {
      *    история), ответ модели выполняется как есть, без второго вызова.
      * 3. Обычная беседа: длинная история и сжатый список функций.
      */
-    suspend fun handle(prompt: String): String {
+    /**
+     * @param fromVoice запрос пришёл голосом: модель предупреждаем, что распознавание могло исказить слова.
+     */
+    suspend fun handle(prompt: String, fromVoice: Boolean = false): String {
         // Ответ на вопрос «Удалить? Скажи да или нет»
         val waiting = pendingState
         if (waiting != null) {
@@ -80,7 +83,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
         }
         asks.clear()
-        val answer = handleInner(prompt)
+        val answer = handleInner(prompt, fromVoice)
         if (asks.isNotEmpty()) {
             pendingState = Pending(asks.toList(), System.currentTimeMillis())
             return answer + "\nСкажи «да» или «нет»."
@@ -88,7 +91,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         return answer
     }
 
-    private suspend fun handleInner(prompt: String): String {
+    private suspend fun handleInner(prompt: String, fromVoice: Boolean): String {
         val normalized = normalize(prompt)
 
         // Уровень 1: правила
@@ -111,7 +114,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
 
         return try {
             val answer = try {
-                askModel(prompt, normalized)
+                askModel(prompt, normalized, fromVoice)
             } catch (e: GroqApiException) {
                 // Короткий лимит «в минуту»: подождём и повторим один раз сами
                 val wait = if (e.code == 429) MusicTagger.retryDelayMs(e.message.orEmpty()) else null
@@ -119,7 +122,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                     .getInt("retry_wait_seconds", 20).coerceIn(0, 30) * 1000L
                 if (wait == null || maxWait == 0L || wait > maxWait) throw e
                 kotlinx.coroutines.delay(wait + 500)
-                askModel(prompt, normalized)
+                askModel(prompt, normalized, fromVoice)
             }
             answer.also { summarizeInBackground() }
         } catch (e: Exception) {
@@ -203,7 +206,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     }
 
     /** Уровни 2 и 3: запрос к модели. */
-    private suspend fun askModel(prompt: String, normalizedPhrase: String): String {
+    private suspend fun askModel(prompt: String, normalizedPhrase: String, fromVoice: Boolean = false): String {
         val history = ChatHistory.load(context)
         val recent = history.takeLast(4).map { it.text }
         val groups = Tools.groupsFor(listOf(prompt) + recent)
@@ -225,6 +228,12 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 put(JSONObject().apply {
                     put("role", if (m.role == "assistant") "assistant" else "user")
                     put("content", m.text)
+                })
+            }
+            if (fromVoice) {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", AssistantPrompt.VOICE_NOTE)
                 })
             }
         }

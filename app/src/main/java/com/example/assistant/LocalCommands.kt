@@ -14,7 +14,25 @@ data class LocalCommand(val name: String, val args: Map<String, Any?> = emptyMap
  */
 object LocalCommands {
 
+    /** Команды, которые нельзя выполнять по исправленной (угаданной) фразе: ошибка здесь дороже. */
+    private val notByGuess = setOf("call_contact", "open_dialer", "create_note", "set_profile", "find_contact", "shared_folder")
+
+    /**
+     * Сначала фраза как есть; если правила её не поняли — вторая попытка с исправленными ошибками распознавания речи
+     * ([SpeechFix]). По угаданной фразе не выполняются звонки, заметки и смена профиля.
+     */
     fun parse(raw: String, now: Calendar = Calendar.getInstance()): LocalCommand? {
+        parseExact(raw, now)?.let { return it }
+        val fixed = SpeechFix.correct(raw)
+        if (fixed.isEmpty() || fixed == TextMatch.normalize(raw) || hasFileName(raw)) return null
+        return parseExact(fixed, now)?.takeIf { it.name !in notByGuess }
+    }
+
+    /** В фразе есть имя файла (clients.csv). */
+    private fun hasFileName(text: String): Boolean =
+        text.lowercase().split(' ').any { tok -> tok.trimEnd('.', ',', '!', '?').substringAfterLast('.', "") in fileExtensions }
+
+    private fun parseExact(raw: String, now: Calendar): LocalCommand? {
         val text = raw.trim()
         if (text.isEmpty()) return null
         val t = TextMatch.normalize(text)
@@ -26,7 +44,7 @@ object LocalCommands {
 
         if (w.size > 12) return null
         // В фразе есть имя файла (clients.csv): это для модели и общей папки, а не для правил
-        if (text.lowercase().split(' ').any { tok -> tok.trimEnd('.', ',', '!', '?').substringAfterLast('.', "") in fileExtensions }) return null
+        if (hasFileName(text)) return null
         // Составная просьба («включи фонарик и поставь будильник») — это для модели: она вызовет несколько функций
         if (w.any { it == "и" || it == "потом" || it == "затем" }) return null
 
@@ -60,7 +78,10 @@ object LocalCommands {
      * «Включи Imagine Dragons», «поставь Баста»: без слов «песню/трек» непонятно, музыка это или нет.
      * Возвращает кандидата на поисковый запрос, а приложение проверит его по библиотеке музыки.
      */
-    fun musicCandidate(raw: String): String? {
+    fun musicCandidate(raw: String): String? =
+        musicCandidateExact(raw) ?: SpeechFix.correct(raw).takeIf { it != TextMatch.normalize(raw) }?.let { musicCandidateExact(it) }
+
+    private fun musicCandidateExact(raw: String): String? {
         val t = TextMatch.normalize(raw)
         val w = t.split(' ')
         if (w.size !in 2..6) return null

@@ -31,7 +31,7 @@ object AssistantRunner {
         activeJob = scope.launch {
             try {
                 val answer = try {
-                    AssistantRepository(app, BuildConfig.GROQ_API_KEY).handle(text)
+                    AssistantRepository(app, BuildConfig.GROQ_API_KEY).handle(text, fromVoice = true)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {

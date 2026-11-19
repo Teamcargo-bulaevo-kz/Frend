@@ -284,4 +284,21 @@ class LocalCommandsTest {
         org.junit.Assert.assertEquals(false, QuickSettings.stateFrom("Bluetooth, Отключено"))
         org.junit.Assert.assertEquals(true, QuickSettings.stateFrom("Wi-Fi, MyNet, Включено"))
     }
+
+    // ---------------------------------------------------------------- ошибки распознавания речи
+
+    @Test fun distortedSpeech() {
+        assertCmd("включите фонарик", "flashlight", "on" to true)
+        assertCmd("выключите фонарик", "flashlight", "on" to false)
+        assertCmd("включи фанарик", "flashlight", "on" to true)
+        alarm("поставь будильнек на 7", 7, 0)
+        assertCmd("сделай скриншод", "take_screenshot")
+    }
+
+    @Test fun distortedSpeechNotGuessed() {
+        // Звонки и заметки по угаданной фразе не выполняются
+        assertNone("позвани маме")
+        assertNone("я включил фонарик вчера")
+        assertNone("прочитай файл clients.csv")
+    }
 }

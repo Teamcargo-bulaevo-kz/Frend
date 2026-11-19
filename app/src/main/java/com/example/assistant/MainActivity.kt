@@ -59,7 +59,7 @@ class MainActivity : AppCompatActivity() {
             val results = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
             val recognized = results?.firstOrNull()
             if (!recognized.isNullOrBlank()) {
-                sendPrompt(recognized)
+                sendPrompt(recognized, fromVoice = true)
             }
         }
     }
@@ -476,7 +476,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendPrompt(prompt: String) {
+    private fun sendPrompt(prompt: String, fromVoice: Boolean = false) {
         if (busy) return
         Speaker.stop()
         input.setText("")
@@ -493,7 +493,7 @@ class MainActivity : AppCompatActivity() {
 
         uiScope.launch {
             val answer = try {
-                repository.handle(prompt)
+                repository.handle(prompt, fromVoice)
             } catch (e: Exception) {
                 FriendlyError.text(e)
             }
