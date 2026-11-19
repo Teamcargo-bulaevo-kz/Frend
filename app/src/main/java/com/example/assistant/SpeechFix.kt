@@ -33,11 +33,16 @@ object SpeechFix {
         return words.mapIndexed { i, word ->
             when {
                 word in verbSet || word in keywordSet -> word
+                // «поставил», «включила» — рассказ в прошедшем времени, а не команда: не исправляем
+                i == 0 && pastTense(word) -> word
                 i == 0 -> closest(word, verbs) ?: closest(word, keywords) ?: word
                 else -> closest(word, keywords) ?: word
             }
         }.joinToString(" ")
     }
+
+    private fun pastTense(word: String) =
+        word.length >= 5 && (word.endsWith("л") || word.endsWith("ла") || word.endsWith("ли") || word.endsWith("ло"))
 
     /**
      * Самое похожее слово из списка: та же первая буква, длина отличается не больше чем на 2,

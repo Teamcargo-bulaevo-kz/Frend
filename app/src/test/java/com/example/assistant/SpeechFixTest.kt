@@ -19,6 +19,9 @@ class SpeechFixTest {
         assertEquals("позвони маме", SpeechFix.correct("Позвони маме"))
         assertEquals("включи баста", SpeechFix.correct("включи баста"))
         assertEquals("", SpeechFix.correct("  "))
+        // Прошедшее время — рассказ, не команда
+        assertEquals("поставил будильник на 7", SpeechFix.correct("поставил будильник на 7"))
+        assertEquals("включила фонарик", SpeechFix.correct("включила фонарик"))
     }
 
     @Test fun closest() {

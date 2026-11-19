@@ -300,5 +300,6 @@ class LocalCommandsTest {
         assertNone("позвани маме")
         assertNone("я включил фонарик вчера")
         assertNone("прочитай файл clients.csv")
+        assertNone("включил фанарик")
     }
 }

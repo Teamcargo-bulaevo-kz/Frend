@@ -26,6 +26,8 @@ class CommandAssemblerTest {
         assertFalse(CommandAssembler.looksIncomplete("нет"))
         assertFalse(CommandAssembler.looksIncomplete("пауза"))
         assertFalse(CommandAssembler.looksIncomplete("громче"))
+        assertFalse(CommandAssembler.looksIncomplete("прибавь"))
+        assertFalse(CommandAssembler.looksIncomplete("ты слышишь меня"))
         assertFalse(CommandAssembler.looksIncomplete(""))
     }
 

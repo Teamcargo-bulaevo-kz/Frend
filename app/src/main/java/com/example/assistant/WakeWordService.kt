@@ -129,6 +129,7 @@ class WakeWordService : Service() {
     private var pendingCommand = ""
     private var pendingParts = 0
     private var pendingGeneration = 0
+    private val continuationTimeout = Runnable { onContinuationTimeout() }
     private var cpuWakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -423,26 +424,35 @@ class WakeWordService : Service() {
         awaitingUntil = 0L
         listeningCuePlayed = false
         playCue(listening = false)
-        handler.postDelayed({ if (!stopped && !paused) runCommand(full) }, 180L)
+        val generation = pendingGeneration
+        // «Отмена» или новое слово активации за эти 180 мс отменяют команду
+        handler.postDelayed({
+            if (!stopped && !paused && generation == pendingGeneration && !processingCommand) runCommand(full)
+        }, 180L)
     }
 
     /** (Пере)запускает ожидание продолжения; если его нет — выполняем то, что услышали, модель переспросит. */
     private fun armContinuation() {
-        val generation = ++pendingGeneration
         awaitingUntil = System.currentTimeMillis() + CommandAssembler.CONTINUE_MS
-        handler.postDelayed({
-            if (stopped || paused || generation != pendingGeneration || pendingCommand.isEmpty()) return@postDelayed
-            val command = pendingCommand
-            ListenLog.add(this, "продолжения нет", command)
-            clearPending()
-            awaitingUntil = 0L
-            listeningCuePlayed = false
-            playCue(listening = false)
-            runCommand(command)
-        }, CommandAssembler.CONTINUE_MS)
+        handler.removeCallbacks(continuationTimeout)
+        handler.postDelayed(continuationTimeout, CommandAssembler.CONTINUE_MS)
+    }
+
+    private fun onContinuationTimeout() {
+        if (stopped || paused || processingCommand || pendingCommand.isEmpty()) return
+        val command = pendingCommand
+        ListenLog.add(this, "продолжения нет", command)
+        clearPending()
+        awaitingUntil = 0L
+        listeningCuePlayed = false
+        playCue(listening = false)
+        runCommand(command)
     }
 
     private fun clearPending() {
+        handler.removeCallbacks(continuationTimeout)
+        // Ждали продолжение — сигнал «слушаю» для нового слова активации должен прозвучать снова
+        if (pendingCommand.isNotEmpty()) listeningCuePlayed = false
         pendingCommand = ""
         pendingParts = 0
         pendingGeneration++

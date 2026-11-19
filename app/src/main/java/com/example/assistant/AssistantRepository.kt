@@ -224,16 +224,18 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                     put("content", "Краткое содержание более ранней части разговора: ${sum.text}")
                 })
             }
-            for (m in history.takeLast(window)) {
+            val shown = history.takeLast(window)
+            for ((i, m) in shown.withIndex()) {
+                // Пометку «голосом» ставим прямо перед самим запросом: последним остаётся сообщение пользователя
+                if (fromVoice && i == shown.lastIndex && m.role != "assistant") {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", AssistantPrompt.VOICE_NOTE)
+                    })
+                }
                 put(JSONObject().apply {
                     put("role", if (m.role == "assistant") "assistant" else "user")
                     put("content", m.text)
-                })
-            }
-            if (fromVoice) {
-                put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", AssistantPrompt.VOICE_NOTE)
                 })
             }
         }
