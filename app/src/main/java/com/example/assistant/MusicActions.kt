@@ -49,7 +49,13 @@ object MusicActions {
         }
         "preset" -> {
             val key = preset?.takeIf { p -> MusicRecommender.presets.any { it.key == p } }
-            if (key != null) MusicWave.start(context, WaveSpec(WaveSpec.Kind.PRESET, preset = key)) else MusicWave.forNow(context)
+            // Своя папка «Для бега» важнее готовой подборки: пользователь её собирал сам
+            val own = key?.let { k -> PlaylistStore.load(context).entries.firstOrNull { (n, list) -> list.isNotEmpty() && MusicWave.presetFromWords(n) == k } }
+            when {
+                own != null -> playlist(context, "play", own.key, emptyList(), shuffle = true)
+                key != null -> MusicWave.start(context, WaveSpec(WaveSpec.Kind.PRESET, preset = key))
+                else -> MusicWave.forNow(context)
+            }
         }
         "now" -> MusicWave.forNow(context)
         "taste" -> MusicRecommender.describeTaste(ListenStats.items(context))

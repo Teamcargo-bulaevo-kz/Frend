@@ -137,7 +137,7 @@ object MusicRecommender {
     /** Насколько песня нравится по поведению: лайк, дослушивания, пропуски; свежие события весят больше. */
     fun affinity(item: RecItem, now: Long): Double {
         val liked = item.tags?.liked ?: 0
-        if (liked < 0) return -5.0
+        if (liked < 0) return -10.0
         val s = item.stats ?: TrackStats()
         val ageDays = if (s.lastPlayedMs > 0) (now - s.lastPlayedMs).coerceAtLeast(0) / DAY_MS.toDouble() else 365.0
         val fresh = 0.4 + 0.6 * exp(-ageDays / 45.0)

@@ -406,6 +406,8 @@ class MusicService : Service() {
         if (listenRecorded) return
         val track = queue.getOrNull(index) ?: return
         listenRecorded = true
+        // Файл не открылся или пользователь переключил до начала звука — это не оценка песни
+        if (!prepared && !finished) return
         val pos = try { if (prepared) player?.currentPosition ?: 0 else 0 } catch (_: Exception) { 0 }
         val listened = if (finished) track.durationMs.coerceAtLeast(pos.toLong()) else pos.toLong()
         val app = applicationContext

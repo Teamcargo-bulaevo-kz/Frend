@@ -582,7 +582,7 @@ object LocalCommands {
         // «включи музыку для бега», «поставь что-нибудь в дорогу», «включи песни для сна»
         if (rest.split(' ').size <= 5 && Regex("(^| )(для|под|в) ").containsMatchIn(" $rest")) {
             val head = rest.split(' ').first()
-            if (head in setOf("музыку", "что", "песни", "треки", "что нибудь", "для", "под", "в", "плейлист", "подборку")) {
+            if (head in setOf("музыку", "что", "песни", "треки", "для", "под", "в")) {
                 MusicWave.presetFromWords(rest)?.let { return LocalCommand("music_wave", mapOf("kind" to "preset", "preset" to it)) }
             }
         }

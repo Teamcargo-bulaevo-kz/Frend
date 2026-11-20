@@ -100,10 +100,10 @@ object ChatHistory {
     fun load(context: Context, chatId: String? = null): MutableList<ChatMessage> =
         readChat(context, chatId ?: currentId(context))?.second?.toMutableList() ?: mutableListOf()
 
-    /** Дописывает сообщение. chatId нужен, если ответ приходит позже и пользователь мог переключить чат. */
     /** Экран чата подписывается, чтобы сразу показывать реплики голосового диалога. Вызывается с любого потока. */
     @Volatile var onChanged: (() -> Unit)? = null
 
+    /** Дописывает сообщение. chatId нужен, если ответ приходит позже и пользователь мог переключить чат. */
     @Synchronized
     fun append(context: Context, role: String, text: String, chatId: String? = null): List<ChatMessage> {
         val id = chatId?.takeIf { file(context, it).exists() } ?: currentId(context)
