@@ -13,19 +13,23 @@
     </style>
     <style name="Theme.Assistant.Transparent" parent="@android:style/Theme.Translucent.NoTitleBar" />
     <style name="Theme.Music" parent="Theme.MaterialComponents.NoActionBar">
-        <item name="android:windowBackground">@color/music_bg</item>
-        <item name="android:statusBarColor">@color/music_bg</item>
-        <item name="android:navigationBarColor">@color/music_bg</item>
-        <item name="colorPrimary">@color/music_accent</item>
-        <item name="colorOnPrimary">@color/music_bg</item>
-        <item name="colorSecondary">@color/music_accent</item>
-        <item name="android:textColorPrimary">@color/music_text</item>
-        <item name="android:textColorSecondary">@color/music_text_dim</item>
-        <item name="android:textColorHint">@color/music_text_dim</item>
+        <item name="android:windowBackground">@color/harmonia_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="colorPrimary">@color/harmonia_violet</item>
+        <item name="colorOnPrimary">@color/harmonia_text</item>
+        <item name="colorSecondary">@color/harmonia_cyan</item>
+        <item name="android:textColorPrimary">@color/harmonia_text</item>
+        <item name="android:textColorSecondary">@color/harmonia_muted</item>
+        <item name="android:textColorHint">@color/harmonia_muted</item>
     </style>
     <style name="Round12" parent="">
         <item name="cornerFamily">rounded</item>
         <item name="cornerSize">12dp</item>
+    </style>
+    <style name="RoundFull" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
     </style>
     <style name="Round24" parent="">
         <item name="cornerFamily">rounded</item>

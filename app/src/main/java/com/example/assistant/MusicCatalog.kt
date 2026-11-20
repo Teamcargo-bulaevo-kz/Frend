@@ -10,7 +10,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Таблица Assistant/Музыка.xlsx: приложение само создаёт её и обновляет, а при переустановке или на другом
+ * Таблица Музыка.xlsx (в личной папке приложения, наружу уходит кнопкой «Поделиться»): приложение само создаёт её и обновляет, а при переустановке или на другом
  * устройстве читает обратно. Так разметка не теряется. Таблицу можно править в Excel: изменения подхватятся.
  * Колонки совпадают с твоим файлом songs_by_mood.xlsx, плюс «Нравится», «Папки» и «Источник».
  */
@@ -31,7 +31,7 @@ object MusicCatalog {
     private val jobLock = Any()
     private val exportLock = Any()
 
-    fun file(): File = File(SharedFolder.root(), FILE_NAME)
+    fun file(): File = File(MusicFiles.root(), FILE_NAME)
 
     // ---------------------------------------------------------------- подписи
 
@@ -56,12 +56,14 @@ object MusicCatalog {
         TrackTags.SOURCE_USER -> "Вручную"
         TrackTags.SOURCE_WEB -> "Интернет"
         TrackTags.SOURCE_IMPORT -> "Импорт"
+        TrackTags.SOURCE_LOCAL -> "Локальный анализ"
         else -> "ИИ"
     }
 
     private fun sourceFromLabel(text: String): String = when (text.trim().lowercase()) {
         "вручную", "вы", "user" -> TrackTags.SOURCE_USER
         "интернет", "web" -> TrackTags.SOURCE_WEB
+        "локальный анализ", "локально", "local" -> TrackTags.SOURCE_LOCAL
         "ии", "ai" -> TrackTags.SOURCE_AI
         else -> TrackTags.SOURCE_IMPORT
     }
@@ -101,7 +103,7 @@ object MusicCatalog {
     fun exportNow(context: Context): Boolean = synchronized(exportLock) { exportLocked(context) }
 
     private fun exportLocked(context: Context): Boolean {
-        if (!SharedFolder.ensure()) return false
+        if (!MusicFiles.ensure()) return false
         val tags = MusicTags.all(context)
         val device = MusicLibrary.index(context).allMusic()
         val byKey = LinkedHashMap<String, Row>()
@@ -137,6 +139,8 @@ object MusicCatalog {
             )
         )
         prefs(context).edit().putLong(KEY_EXPORTED, target.lastModified()).apply()
+        // копия в «Документы/Harmonia», чтобы файл можно было взять из файлового менеджера
+        try { PublicFolder.mirrorTable(context, target, rows.size - 1) } catch (_: Exception) {}
         return true
     }
 
@@ -164,7 +168,7 @@ object MusicCatalog {
      * читает её. Возвращает число обновлённых песен. Блокирующий.
      */
     fun syncOnStart(context: Context): Int {
-        if (!SharedFolder.ensure()) return 0
+        if (!MusicFiles.ensure()) return 0
         val f = file()
         if (!f.exists()) return 0
         val exported = prefs(context).getLong(KEY_EXPORTED, 0L)

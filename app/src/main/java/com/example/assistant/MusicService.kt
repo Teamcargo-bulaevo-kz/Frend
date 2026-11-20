@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -54,6 +55,9 @@ class MusicService : Service() {
     private var session: MediaSession? = null
     private var player: MediaPlayer? = null
 
+    /** Audio session активного трека для спектрального визуализатора экрана плеера. */
+    val audioSessionId: Int get() = player?.audioSessionId ?: 0
+
     private var prepared = false
     private var wantPlay = true
 
@@ -65,6 +69,8 @@ class MusicService : Service() {
     private val sleepRunnable = Runnable { pause(); PlayerState.sleepAtMs = 0L }
     private var index = 0
     private var errorsInRow = 0
+    private var errorRetries = 0
+    private var resumeAtMs = 0
     private var resumeOnFocusGain = false
 
     private val focusRequest: AudioFocusRequest by lazy {
@@ -80,6 +86,7 @@ class MusicService : Service() {
     }
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        PlayLog.add("звуковой фокус: ${focusName(change)}")
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS -> pause()
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
@@ -101,6 +108,40 @@ class MusicService : Service() {
         }
     }
 
+    private fun focusName(c: Int) = when (c) {
+        AudioManager.AUDIOFOCUS_LOSS -> "потерян насовсем (другое приложение захватило звук)"
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> "потерян ненадолго"
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> "потерян, можно приглушить"
+        AudioManager.AUDIOFOCUS_GAIN -> "возвращён"
+        else -> "код $c"
+    }
+
+    /** Автостоп: если музыка долго на паузе, освобождаем плеер, чтобы системные кнопки ничего не включали сами. */
+    private val idleStop = Runnable {
+        if (player?.isPlaying != true) stopPlayback("пауза дольше 10 минут")
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        PlayLog.add("приложение смахнули из недавних")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        PlayLog.add("системе не хватает памяти (уровень $level)")
+        super.onTrimMemory(level)
+    }
+
+    /** Наушники или Bluetooth отключились: ставим на паузу, чтобы музыка не заиграла из динамика. */
+    private val noisyReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && MusicSettings.pauseOnUnplug && player?.isPlaying == true) {
+                PlayLog.add("наушники или Bluetooth отключились: пауза")
+                pause()
+            }
+        }
+    }
+    private var noisyRegistered = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -109,13 +150,17 @@ class MusicService : Service() {
         instance = this
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createChannel()
+        try {
+            registerReceiver(noisyReceiver, android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+            noisyRegistered = true
+        } catch (_: Exception) {}
         session = MediaSession(this, "AssistantMusic").apply {
             setCallback(object : MediaSession.Callback() {
-                override fun onPlay() = resume()
-                override fun onPause() = pause()
-                override fun onSkipToNext() = next(auto = false)
-                override fun onSkipToPrevious() = previous()
-                override fun onStop() = stopPlayback()
+                override fun onPlay() { PlayLog.add("команда Play от системы (наушники, Bluetooth, шторка)"); resume() }
+                override fun onPause() { PlayLog.add("команда Pause от системы"); pause() }
+                override fun onSkipToNext() { PlayLog.add("команда Next от системы"); next(auto = false) }
+                override fun onSkipToPrevious() { PlayLog.add("команда Previous от системы"); previous() }
+                override fun onStop() = stopPlayback("команда Stop от системы")
                 override fun onSeekTo(pos: Long) = seekTo(pos.toInt())
                 override fun onCustomAction(action: String, extras: android.os.Bundle?) {
                     if (action == ACTION_LIKE) toggleLike()
@@ -135,13 +180,15 @@ class MusicService : Service() {
                 shuffleOn = false
                 index = intent.getIntExtra(EXTRA_INDEX, 0)
                 errorsInRow = 0
+                errorRetries = 0
+                resumeAtMs = 0
                 playCurrent()
             }
             ACTION_PAUSE -> pause()
             ACTION_RESUME -> resume()
             ACTION_NEXT -> next(auto = false)
             ACTION_PREV -> previous()
-            ACTION_STOP -> stopPlayback()
+            ACTION_STOP -> stopPlayback("кнопка Стоп в уведомлении")
             ACTION_LIKE -> toggleLike()
         }
         if (queue.isEmpty()) stopSelf()
@@ -149,6 +196,9 @@ class MusicService : Service() {
     }
 
     override fun onDestroy() {
+        PlayLog.add("служба музыки остановлена")
+        handler.removeCallbacks(idleStop)
+        if (noisyRegistered) { try { unregisterReceiver(noisyReceiver) } catch (_: Exception) {}; noisyRegistered = false }
         releasePlayer()
         abandonFocus()
         handler.removeCallbacks(sleepRunnable)
@@ -164,16 +214,18 @@ class MusicService : Service() {
 
     private fun playCurrent() {
         if (queue.isEmpty()) {
-            stopPlayback()
+            stopPlayback("очередь пуста")
             return
         }
         if (index !in queue.indices) index = 0
+        handler.removeCallbacks(idleStop)
         releasePlayer()
         requestFocus()
         prepared = false
         wantPlay = true
 
         val track = queue[index]
+        PlayLog.add("играет: ${track.artist} - ${track.title} (${index + 1} из ${queue.size})")
         val mp = MediaPlayer()
         try {
             mp.setAudioAttributes(
@@ -188,15 +240,31 @@ class MusicService : Service() {
                 if (player === it) {
                     errorsInRow = 0
                     prepared = true
+                    if (resumeAtMs > 0) { try { it.seekTo(resumeAtMs) } catch (_: Exception) {}; resumeAtMs = 0 }
                     if (wantPlay) it.start()
+                    if (MusicSettings.auraEnabled || MusicSettings.listAura || MusicSettings.debugView) BeatSource.attach(it.audioSessionId)
+                    EqualizerManager.attach(it.audioSessionId)
                     refreshState()
                 }
             }
             mp.setOnCompletionListener {
-                if (player === it) next(auto = true)
+                if (player === it) { PlayLog.add("трек закончился"); errorRetries = 0; next(auto = true) }
             }
-            mp.setOnErrorListener { failed, _, _ ->
-                if (player === failed) skipBroken()
+            mp.setOnErrorListener { failed, what, extra ->
+                PlayLog.add("ошибка плеера: код $what/$extra")
+                if (player === failed) {
+                    // Сбой во время игры (например, декодеру не хватило ресурсов): два раза пробуем продолжить с того же места,
+                    // и только потом пропускаем песню. Так трек не перескакивает сам.
+                    val pos = try { if (prepared) failed.currentPosition else 0 } catch (_: Exception) { 0 }
+                    if (prepared && errorRetries < 2) {
+                        errorRetries++
+                        PlayLog.add("ошибка плеера: пробую продолжить с ${pos / 1000} с (попытка $errorRetries)")
+                        val w = wantPlay
+                        resumeAtMs = pos
+                        playCurrent()
+                        wantPlay = w
+                    } else skipBroken()
+                }
                 true
             }
             player = mp
@@ -214,7 +282,7 @@ class MusicService : Service() {
     private fun skipBroken() {
         errorsInRow++
         if (errorsInRow >= queue.size) {
-            stopPlayback()
+            stopPlayback("подряд не открылись все треки")
         } else {
             next(auto = false)
         }
@@ -227,7 +295,7 @@ class MusicService : Service() {
             return
         }
         if (auto && index >= queue.lastIndex && repeatMode != PlayerState.REPEAT_ALL) {
-            stopPlayback()
+            stopPlayback("очередь закончилась")
             return
         }
         index = if (index >= queue.lastIndex) 0 else index + 1
@@ -250,24 +318,35 @@ class MusicService : Service() {
         resumeOnFocusGain = false
         wantPlay = false
         player?.let { if (prepared && it.isPlaying) it.pause() }
+        handler.removeCallbacks(idleStop)
+        handler.postDelayed(idleStop, 10 * 60_000L)
+        PlayLog.add("пауза")
         refreshState()
     }
 
     private fun resume() {
-        val current = player
-        if (current == null) {
-            if (queue.isNotEmpty()) playCurrent()
+        // Воспроизведение разрешено только после явного ACTION_PLAY.
+        // Системный MediaSession/кнопка Resume не должны создавать новый трек
+        // или запускать случайную очередь после пересоздания службы.
+        val current = player ?: return
+        handler.removeCallbacks(idleStop)
+        current.setVolume(1f, 1f) // после приглушения другим приложением громкость не должна остаться 20 %
+        PlayLog.add("продолжить")
+        if (!prepared) {
+            wantPlay = true
             return
         }
-        wantPlay = true
-        if (prepared && !current.isPlaying) {
+        if (!current.isPlaying) {
+            wantPlay = true
             requestFocus()
             current.start()
         }
         refreshState()
     }
 
-    private fun stopPlayback() {
+    private fun stopPlayback(why: String = "команда") {
+        PlayLog.add("остановка: $why")
+        handler.removeCallbacks(idleStop)
         releasePlayer()
         abandonFocus()
         queue = emptyList()
@@ -276,6 +355,8 @@ class MusicService : Service() {
     }
 
     private fun releasePlayer() {
+        BeatSource.detach()
+        EqualizerManager.release()
         player?.let {
             try {
                 it.setOnPreparedListener(null)
@@ -311,6 +392,8 @@ class MusicService : Service() {
         if (i !in queue.indices) return
         index = i
         errorsInRow = 0
+        errorRetries = 0
+        resumeAtMs = 0
         playCurrent()
     }
 
@@ -422,6 +505,9 @@ class MusicService : Service() {
         )
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
+            .setColor(Color.rgb(82, 190, 210))
+            .setCategory(Notification.CATEGORY_TRANSPORT)
+            .setPriority(Notification.PRIORITY_LOW)
             .setContentTitle(track?.title ?: "Музыка")
             .setContentText(track?.artist.orEmpty())
             .setContentIntent(open)

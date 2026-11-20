@@ -2,36 +2,38 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:background="?attr/selectableItemBackground"
+    android:minHeight="68dp"
+    android:layout_marginStart="10dp" android:layout_marginEnd="10dp"
+    android:layout_marginTop="2dp" android:layout_marginBottom="2dp"
+    android:background="@drawable/harmonia_row_bg"
     android:gravity="center_vertical" android:orientation="horizontal"
-    android:paddingStart="16dp" android:paddingTop="7dp" android:paddingEnd="4dp" android:paddingBottom="7dp">
+    android:paddingStart="10dp" android:paddingTop="7dp" android:paddingEnd="4dp" android:paddingBottom="7dp">
 
-    <FrameLayout android:layout_width="54dp" android:layout_height="54dp">
+    <FrameLayout android:layout_width="52dp" android:layout_height="52dp">
         <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/cover" android:layout_width="match_parent" android:layout_height="match_parent"
             android:scaleType="centerCrop" android:src="@drawable/cover_placeholder"
-            app:shapeAppearanceOverlay="@style/Round12" />
+            app:shapeAppearanceOverlay="@style/RoundFull" />
         <TextView
             android:id="@+id/badge" android:layout_width="match_parent" android:layout_height="match_parent"
             android:background="@drawable/badge_bg" android:gravity="center" android:textColor="#FFFFFF"
-            android:textSize="22sp" android:textStyle="bold" android:visibility="gone" />
+            android:textSize="18sp" android:textStyle="bold" android:visibility="gone" />
     </FrameLayout>
 
     <LinearLayout
-        android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="14dp"
+        android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp"
         android:layout_weight="1" android:orientation="vertical">
         <TextView
             android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:ellipsize="end" android:maxLines="1" android:textColor="@color/music_text" android:textSize="16sp"
-            android:textStyle="bold" />
+            android:ellipsize="end" android:maxLines="1" android:textColor="@color/harmonia_text" android:textSize="15sp" />
         <TextView
             android:id="@+id/subtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="1dp" android:ellipsize="end" android:maxLines="1"
-            android:textColor="@color/music_text_dim" android:textSize="13sp" />
+            android:textColor="@color/harmonia_muted" android:textSize="12sp" />
         <TextView
             android:id="@+id/tags" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="1dp" android:ellipsize="end" android:maxLines="1"
-            android:textColor="@color/music_accent" android:textSize="12sp" android:visibility="gone" />
+            android:textColor="@color/harmonia_cyan" android:textSize="12sp" android:visibility="gone" />
     </LinearLayout>
 
     <ImageButton

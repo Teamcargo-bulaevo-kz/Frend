@@ -6,6 +6,8 @@
     <!-- Только чтение: какие приложения чаще используются и сколько места занимают. Пользователь включает вручную в настройках. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Эквалайзер и анализатор звука встроенного плеера -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!-- Доступ к музыке, фото и видео -->
@@ -94,7 +96,8 @@
             android:label="Музыка"
             android:launchMode="singleTask"
             android:taskAffinity="com.example.assistant.music"
-            android:theme="@style/Theme.Music">
+            android:theme="@style/Theme.Music"
+            android:windowSoftInputMode="stateHidden|adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -105,11 +108,26 @@
             android:exported="false"
             android:label="Характеристики"
             android:taskAffinity="com.example.assistant.music"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Music" />
         <activity
             android:name=".PlayerActivity"
             android:exported="false"
             android:label="Музыка"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait"
+            android:taskAffinity="com.example.assistant.music"
+            android:theme="@style/Theme.Music" />
+        <activity
+            android:name=".CoverEditorActivity"
+            android:exported="false"
+            android:label="Обложка"
+            android:taskAffinity="com.example.assistant.music"
+            android:theme="@style/Theme.Music" />
+        <activity
+            android:name=".MusicSettingsActivity"
+            android:exported="false"
+            android:label="Настройки музыки"
             android:taskAffinity="com.example.assistant.music"
             android:theme="@style/Theme.Music" />
 

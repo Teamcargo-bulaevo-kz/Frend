@@ -18,7 +18,9 @@ data class MusicTrack(
     val artist: String,
     val album: String = "",
     val isMusic: Boolean = true,
-    val dateAdded: Long = 0
+    val dateAdded: Long = 0,
+    val durationMs: Long = 0,
+    val path: String = ""
 ) {
     val uri: Uri
         get() = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
@@ -55,14 +57,26 @@ object MusicLibrary {
     fun search(context: Context, query: String, limit: Int = 50): List<MusicTrack> =
         index(context).search(query, limit)
 
-    private fun load(context: Context): List<MusicTrack> {
+    private fun load(context: Context): List<MusicTrack> =
+        loadRaw(context).filter { !MusicSettings.isPathHidden(it.path) }.map { repairText(context, it) }
+
+    /** Папки с музыкой: путь и число песен (включая выключенные). Блокирующий. */
+    fun folders(context: Context): List<Pair<String, Int>> =
+        loadRaw(context).filter { it.path.isNotEmpty() }
+            .groupingBy { it.path.substringBeforeLast('/') }.eachCount()
+            .toList().sortedBy { it.first.lowercase() }
+
+    private fun loadRaw(context: Context): List<MusicTrack> {
+        @Suppress("DEPRECATION") val dataCol = MediaStore.Audio.Media.DATA
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.IS_MUSIC,
-            MediaStore.Audio.Media.DATE_ADDED
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DURATION,
+            dataCol
         )
         // Музыка, а также любое длинное аудио (альбомы без тегов, скачанное из мессенджеров).
         // Рингтоны, будильники и уведомления не берём.
@@ -82,6 +96,8 @@ object MusicLibrary {
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val musicCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.IS_MUSIC)
                 val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val pathCol = cursor.getColumnIndexOrThrow(dataCol)
                 while (cursor.moveToNext()) {
                     val artist = cursor.getString(artistCol).orEmpty()
                     result += MusicTrack(
@@ -90,7 +106,9 @@ object MusicLibrary {
                         artist = if (artist == "<unknown>") "" else artist,
                         album = cursor.getString(albumCol).orEmpty(),
                         isMusic = cursor.getInt(musicCol) != 0,
-                        dateAdded = cursor.getLong(addedCol)
+                        dateAdded = cursor.getLong(addedCol),
+                        durationMs = cursor.getLong(durationCol).coerceAtLeast(0),
+                        path = cursor.getString(pathCol).orEmpty()
                     )
                 }
             }
@@ -98,6 +116,35 @@ object MusicLibrary {
             // нет доступа к аудио — вернём пустой список
         }
         return result
+    }
+
+    /** Чинит «кракозябры» в названии/исполнителе: сначала перекодировкой, потом чтением ID3 из файла. */
+    private fun repairText(context: Context, t: MusicTrack): MusicTrack {
+        if (!Id3Tags.looksBroken(t.title) && !Id3Tags.looksBroken(t.artist) && !Id3Tags.looksBroken(t.album)) return t
+        var title = Id3Tags.repairLatin1(t.title)
+        var artist = Id3Tags.repairLatin1(t.artist)
+        var album = Id3Tags.repairLatin1(t.album)
+        if (Id3Tags.looksBroken(title) || Id3Tags.looksBroken(artist) || Id3Tags.looksBroken(album)) {
+            try {
+                context.contentResolver.openInputStream(t.uri)?.use { input ->
+                    val buf = ByteArray(65536)
+                    var n = 0
+                    while (n < buf.size) {
+                        val r = input.read(buf, n, buf.size - n)
+                        if (r <= 0) break
+                        n += r
+                    }
+                    Id3Tags.parse(buf.copyOf(n))?.let { id3 ->
+                        if (Id3Tags.looksBroken(title) && id3.title.isNotBlank()) title = id3.title
+                        if (Id3Tags.looksBroken(artist) && id3.artist.isNotBlank()) artist = id3.artist
+                        if (Id3Tags.looksBroken(album) && id3.album.isNotBlank()) album = id3.album
+                    }
+                }
+            } catch (e: Exception) {
+                // файл недоступен — оставим как есть
+            }
+        }
+        return t.copy(title = title, artist = artist, album = album)
     }
 }
 
@@ -131,7 +178,7 @@ object MusicIndexer {
         var visited = 0
         val tree = root.walkTopDown()
             .maxDepth(8)
-            .onEnter { dir -> !dir.name.startsWith(".") && dir != androidDir }
+            .onEnter { dir -> !dir.name.startsWith(".") && dir != androidDir && MusicSettings.isFolderEnabled(dir.path) }
         for (file in tree) {
             visited++
             if (visited > MAX_VISITED || fresh.size >= MAX_NEW_FILES) break

@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@color/music_bg" android:orientation="vertical">
+    android:background="@color/harmonia_bg">
+
+    <com.example.assistant.AuraView
+        android:id="@+id/aura"
+        android:layout_width="match_parent" android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/content" android:focusable="true" android:focusableInTouchMode="true"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -11,48 +20,60 @@
         <TextView
             android:id="@+id/screenTitle" android:layout_width="0dp" android:layout_height="wrap_content"
             android:ellipsize="end" android:maxLines="1"
-            android:layout_weight="1" android:text="Музыка" android:textColor="@color/music_text"
-            android:textSize="28sp" android:textStyle="bold" />
-        <ImageButton
-            android:id="@+id/shuffleAll" android:layout_width="48dp" android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Вперемешку"
-            android:padding="12dp" android:scaleType="fitCenter" android:src="@drawable/ic_shuffle" android:tint="@color/music_accent" />
+            android:layout_weight="1" android:text="Harmonia" android:textColor="@color/harmonia_text"
+            android:textSize="24sp" android:textStyle="bold" />
         <ImageButton
             android:id="@+id/moreButton" android:layout_width="48dp" android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Ещё"
-            android:padding="12dp" android:scaleType="fitCenter" android:src="@drawable/ic_more" android:tint="@color/music_text" />
+            android:background="@drawable/harmonia_icon_button" android:contentDescription="Ещё"
+            android:padding="12dp" android:scaleType="fitCenter" android:src="@drawable/ic_more" android:tint="@color/harmonia_text" />
     </LinearLayout>
 
     <EditText
         android:id="@+id/search" android:layout_width="match_parent" android:layout_height="48dp"
         android:layout_marginStart="16dp" android:layout_marginTop="8dp" android:layout_marginEnd="16dp"
-        android:background="@drawable/search_bg" android:drawableStart="@drawable/ic_search"
-        android:drawablePadding="10dp" android:drawableTint="@color/music_text_dim" android:hint="Поиск песен и исполнителей"
+        android:background="@drawable/harmonia_search_bg" android:drawableStart="@drawable/ic_search"
+        android:drawablePadding="10dp" android:drawableTint="@color/harmonia_muted" android:hint="Поиск песен и исполнителей"
         android:imeOptions="actionSearch" android:inputType="text" android:maxLines="1"
-        android:paddingStart="16dp" android:paddingEnd="16dp" android:textColor="@color/music_text"
-        android:textColorHint="@color/music_text_dim" android:textSize="15sp" />
+        android:paddingStart="16dp" android:paddingEnd="16dp" android:textColor="@color/harmonia_text"
+        android:textColorHint="@color/harmonia_muted" android:textSize="15sp" />
 
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabs" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="6dp" android:background="@color/music_bg"
-        app:tabIndicatorColor="@color/music_accent" app:tabIndicatorFullWidth="false" app:tabIndicatorHeight="3dp"
-        app:tabMode="scrollable" app:tabRippleColor="@null" app:tabTextAppearance="@style/MusicTabText"
-        app:tabSelectedTextColor="@color/music_accent" app:tabTextColor="@color/music_text_dim" />
+        android:layout_marginTop="6dp" android:background="@android:color/transparent"
+        app:tabIndicatorColor="@color/harmonia_cyan" app:tabIndicatorFullWidth="false" app:tabIndicatorHeight="3dp"
+        app:tabMode="fixed" app:tabRippleColor="@null" app:tabTextAppearance="@style/MusicTabText"
+        app:tabSelectedTextColor="@color/harmonia_cyan" app:tabTextColor="@color/harmonia_muted" />
 
     <TextView
         android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginStart="16dp" android:layout_marginTop="8dp" android:layout_marginEnd="16dp"
         android:background="@drawable/banner_bg" android:padding="12dp"
-        android:textColor="@color/music_text_dim" android:textSize="13sp" android:visibility="gone" />
+        android:textColor="@color/harmonia_muted" android:textSize="13sp" android:visibility="gone" />
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/list" android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_marginTop="4dp" android:layout_weight="1" android:clipToPadding="false" android:paddingBottom="8dp" />
+    <FrameLayout
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:layout_gravity="fill">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/list" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layoutAnimation="@anim/music_list_enter"
+            app:fastScrollEnabled="true" app:fastScrollVerticalThumbDrawable="@drawable/fast_thumb"
+            app:fastScrollVerticalTrackDrawable="@drawable/fast_track" app:fastScrollHorizontalThumbDrawable="@drawable/fast_thumb_h"
+            app:fastScrollHorizontalTrackDrawable="@drawable/fast_track_h" android:clipToPadding="false" android:overScrollMode="ifContentScrolls"
+            android:paddingStart="2dp" android:paddingTop="8dp" android:paddingEnd="2dp" android:paddingBottom="12dp" />
+
+        <TextView
+            android:id="@+id/loadingHint" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center" android:gravity="center"
+            android:text="Загружаю музыку…"
+            android:textColor="@color/harmonia_muted" android:textSize="15sp"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <LinearLayout
         android:id="@+id/miniPlayer" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginStart="10dp" android:layout_marginEnd="10dp" android:layout_marginBottom="10dp"
-        android:background="@drawable/mini_bg" android:orientation="vertical" android:visibility="gone">
+        android:background="@drawable/harmonia_mini_bg" android:orientation="vertical" android:visibility="gone">
         <LinearLayout
             android:layout_width="match_parent" android:layout_height="68dp" android:gravity="center_vertical"
             android:orientation="horizontal" android:paddingStart="10dp" android:paddingEnd="6dp">
@@ -65,11 +86,11 @@
                 android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
                 <TextView
                     android:id="@+id/miniTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:ellipsize="end" android:maxLines="1" android:textColor="@color/music_text" android:textSize="15sp"
+                    android:ellipsize="end" android:maxLines="1" android:textColor="@color/harmonia_text" android:textSize="15sp"
                     android:textStyle="bold" />
                 <TextView
                     android:id="@+id/miniArtist" android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:ellipsize="end" android:maxLines="1" android:textColor="@color/music_text_dim" android:textSize="12sp" />
+                    android:ellipsize="end" android:maxLines="1" android:textColor="@color/harmonia_muted" android:textSize="12sp" />
             </LinearLayout>
             <ImageButton
                 android:id="@+id/miniPrev" android:layout_width="44dp" android:layout_height="44dp"
@@ -88,6 +109,7 @@
             android:id="@+id/miniProgress" style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent" android:layout_height="3dp" android:layout_marginStart="14dp"
             android:layout_marginEnd="14dp" android:layout_marginBottom="8dp"
-            android:progressTint="@color/music_accent" android:progressBackgroundTint="@color/music_stroke" />
+            android:progressTint="@color/harmonia_cyan" android:progressBackgroundTint="@color/harmonia_stroke" />
     </LinearLayout>
 </LinearLayout>
+</FrameLayout>

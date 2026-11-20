@@ -1,11 +1,11 @@
 <resources>
-    <color name="music_bg">#0E0E13</color>
-    <color name="music_surface">#1A1A22</color>
-    <color name="music_surface2">#24242F</color>
-    <color name="music_stroke">#2E2E3B</color>
-    <color name="music_accent">#FF6B4A</color>
-    <color name="music_accent_soft">#33FF6B4A</color>
-    <color name="music_text">#F4F4F8</color>
-    <color name="music_text_dim">#9A9AAB</color>
-    <color name="music_icon_bg">#FF6B4A</color>
+    <color name="music_bg">@color/harmonia_bg</color>
+    <color name="music_surface">@color/harmonia_surface</color>
+    <color name="music_surface2">@color/harmonia_surface_2</color>
+    <color name="music_stroke">@color/harmonia_stroke</color>
+    <color name="music_accent">@color/harmonia_violet</color>
+    <color name="music_accent_soft">#448C7BFF</color>
+    <color name="music_text">@color/harmonia_text</color>
+    <color name="music_text_dim">@color/harmonia_muted</color>
+    <color name="music_icon_bg">#4A3CFF</color>
 </resources>

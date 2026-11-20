@@ -56,14 +56,19 @@ object MusicAiPack {
             !MusicTags.isTagged(tg) || (tg != null && tg.needsReview)
         }.sortedWith(compareBy({ it.artist.lowercase() }, { it.title.lowercase() }))
 
-    /** Создаёт части в Исходящие/«Музыка для ИИ». Блокирующий. Возвращает текст для пользователя. */
+    /** Файлы, подготовленные последним вызовом [build], по порядку. */
+    fun partFiles(): List<File> =
+        File(MusicFiles.outbox(), FOLDER).listFiles { f -> f.isFile && f.name.startsWith("часть ") && f.extension == "txt" }
+            .orEmpty().sortedBy { it.name }
+
+    /** Создаёт части в папке приложения «Музыка для ИИ». Блокирующий. Возвращает текст для пользователя. */
     fun build(context: Context): String {
-        if (!SharedFolder.ensure()) return "Нет доступа к общей папке Assistant. Разреши доступ ко всем файлам в настройках."
+        if (!MusicFiles.ensure()) return "Не получилось создать папку для файлов."
         val music = MusicLibrary.index(context, force = true).allMusic()
         if (music.isEmpty()) return "Не вижу музыку на телефоне. Разреши доступ к аудио."
         val songs = songsToSend(context, music)
         if (songs.isEmpty()) return "Все песни уже размечены, отдавать другому ИИ нечего."
-        val dir = File(SharedFolder.outbox(), FOLDER)
+        val dir = File(MusicFiles.outbox(), FOLDER)
         dir.mkdirs()
         // Старые части заменяем новыми: список песен мог измениться
         dir.listFiles { f -> f.isFile && f.name.startsWith("часть ") && f.extension == "txt" }.orEmpty().forEach { it.delete() }
@@ -72,8 +77,8 @@ object MusicAiPack {
             val name = "часть %02d из %02d.txt".format(i + 1, chunks.size)
             File(dir, name).writeText(partText(chunk, i + 1, chunks.size), Charsets.UTF_8)
         }
-        return "Подготовил ${songs.size} песен в ${chunks.size} файлах: Assistant/Исходящие/$FOLDER. " +
-            "Открой файл, скопируй всё в любой ИИ (ChatGPT, Gemini, Claude), скопируй его ответ и в «Музыке» нажми ⋮ → «Вставить ответ другого ИИ». " +
-            "Или сохрани ответ как csv во «Входящие» и скажи «импортируй таблицу музыки»."
+        return "Подготовил ${songs.size} песен в ${chunks.size} файлах. " +
+            "Нажми «Отправить» и выбери любой ИИ (ChatGPT, Gemini, Claude), скопируй его ответ и в «Музыке» нажми ⋮ → «Вставить ответ другого ИИ». " +
+            "Или сохрани ответ как csv и выбери его через ⋮ → «Выбрать файл с разметкой…»."
     }
 }

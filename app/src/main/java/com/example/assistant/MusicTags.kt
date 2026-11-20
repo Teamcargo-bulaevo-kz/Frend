@@ -5,6 +5,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+data class MoodSegment(
+    val startSeconds: Int,
+    val endSeconds: Int,
+    val mood: String,
+    val valence: Int,
+    val arousal: Int,
+    val tension: Int,
+    val scores: Map<String, Int> = emptyMap()
+)
+
 /**
  * Всё, что известно о песне: жанр, настроения (можно несколько), энергичность, темп, описание,
  * уверенность в оценке, лайк и откуда данные. artist/title/album хранятся рядом, чтобы таблица
@@ -27,13 +37,21 @@ data class TrackTags(
     val note: String = "",
     val artist: String = "",
     val title: String = "",
-    val album: String = ""
+    val album: String = "",
+    val moodScores: Map<String, Int> = emptyMap(),
+    val segments: List<MoodSegment> = emptyList(),
+    val bpm: Int = 0,
+    val valence: Int = 0,
+    val arousal: Int = 0,
+    val tension: Int = 0,
+    val danceability: Int = 0
 ) {
     companion object {
         const val SOURCE_AI = "ai"
         const val SOURCE_WEB = "web"
         const val SOURCE_USER = "user"
         const val SOURCE_IMPORT = "import"
+        const val SOURCE_LOCAL = "local"
     }
 
     /** Подпись жанра для людей: свободный текст, если есть, иначе из словаря. */
@@ -47,6 +65,26 @@ data class TrackTags(
 object MusicTags {
 
     const val REVIEW_BELOW = 55
+
+    /** Общий фильтр для пользовательских музыкальных подборок. BPM=0 означает неизвестный темп. */
+    fun matchesPlaylistFilter(
+        tags: TrackTags,
+        mood: String? = null,
+        minimumEnergy: Int = 1,
+        minimumBpm: Int = 0,
+        maximumBpm: Int = 0
+    ): Boolean {
+        if (minimumEnergy !in 1..5 || minimumBpm !in 0..240 || maximumBpm !in 0..240) return false
+        if (minimumBpm > 0 && maximumBpm > 0 && minimumBpm > maximumBpm) return false
+        val moodMatches = mood.isNullOrBlank() ||
+            mood in tags.moods || (tags.moodScores[mood] ?: 0) >= 10
+        val hasTempoFilter = minimumBpm > 0 || maximumBpm > 0
+        // Неизвестный BPM нельзя считать подходящим, если пользователь задал диапазон.
+        val bpmMatches = if (!hasTempoFilter) true else tags.bpm > 0 &&
+            (minimumBpm == 0 || tags.bpm >= minimumBpm) &&
+            (maximumBpm == 0 || tags.bpm <= maximumBpm)
+        return moodMatches && tags.energy >= minimumEnergy && bpmMatches
+    }
 
     val moods: Map<String, String> = linkedMapOf(
         "energetic" to "Энергичная",
@@ -216,7 +254,8 @@ object MusicTags {
     // ---------------------------------------------------------------- хранение
 
     private const val FILE_NAME = "music_tags.json"
-    @Volatile private var cache: MutableMap<String, TrackTags>? = null
+    // Копия при записи: читатели получают целую карту без блокировки и не ловят ConcurrentModificationException.
+    @Volatile private var cache: Map<String, TrackTags>? = null
 
     fun trackKey(artist: String, title: String): String = TextMatch.normalize("$artist $title")
     fun trackKey(t: MusicTrack): String = trackKey(t.artist, t.title)
@@ -228,6 +267,9 @@ object MusicTags {
         .put("gl", v.genreLabel).put("t", v.tempo).put("d", v.description).put("c", v.confidence)
         .put("s", v.source).put("l", v.liked).put("ed", v.edited).put("w", v.webTried).put("at", v.aiTried).put("n", v.note)
         .put("ar", v.artist).put("ti", v.title).put("al", v.album)
+        .put("mp", JSONObject().apply { for ((key, score) in v.moodScores) put(key, score) })
+        .put("bpm", v.bpm).put("vl", v.valence).put("au", v.arousal).put("tn", v.tension).put("dy", v.danceability)
+        .put("sg", JSONArray().apply { for (segment in v.segments) put(JSONObject().put("s", segment.startSeconds).put("e", segment.endSeconds).put("m", segment.mood).put("v", segment.valence).put("a", segment.arousal).put("t", segment.tension).put("sc", JSONObject().apply { for ((key, score) in segment.scores) put(key, score) })) })
 
     private fun fromJson(o: JSONObject): TrackTags {
         val mood = o.optString("m", "calm")
@@ -239,12 +281,34 @@ object MusicTags {
             description = o.optString("d"), confidence = o.optInt("c", 70), source = o.optString("s", TrackTags.SOURCE_AI),
             liked = o.optInt("l", 0), edited = o.optBoolean("ed", false), webTried = o.optBoolean("w", false),
             aiTried = o.optBoolean("at", false),
-            note = o.optString("n"), artist = o.optString("ar"), title = o.optString("ti"), album = o.optString("al")
+            note = o.optString("n"), artist = o.optString("ar"), title = o.optString("ti"), album = o.optString("al"),
+            bpm = o.optInt("bpm", 0).coerceIn(0, 300), valence = o.optInt("vl", 0).coerceIn(0, 100),
+            arousal = o.optInt("au", 0).coerceIn(0, 100), tension = o.optInt("tn", 0).coerceIn(0, 100),
+            danceability = o.optInt("dy", 0).coerceIn(0, 100),
+            moodScores = o.optJSONObject("mp")?.let { scores ->
+                val values = LinkedHashMap<String, Int>()
+                for (key in scores.keys()) if (key in this.moods) values[key] = scores.optInt(key).coerceIn(0, 100)
+                values
+            } ?: emptyMap(),
+            segments = o.optJSONArray("sg")?.let { array ->
+                (0 until array.length()).mapNotNull { index ->
+                    val item = array.optJSONObject(index) ?: return@mapNotNull null
+                    val segmentScores = item.optJSONObject("sc")?.let { values ->
+                        val map = LinkedHashMap<String, Int>()
+                        for (key in values.keys()) if (key in this.moods) map[key] = values.optInt(key).coerceIn(0, 100)
+                        map
+                    } ?: emptyMap()
+                    val moodKey = item.optString("m", "calm").takeIf { it in this.moods } ?: "calm"
+                    MoodSegment(item.optInt("s").coerceAtLeast(0), item.optInt("e").coerceAtLeast(0), moodKey, item.optInt("v").coerceIn(0, 100), item.optInt("a").coerceIn(0, 100), item.optInt("t").coerceIn(0, 100), segmentScores)
+                }
+            } ?: emptyList()
         )
     }
 
+    private fun loaded(context: Context): Map<String, TrackTags> = cache ?: load(context)
+
     @Synchronized
-    private fun loaded(context: Context): MutableMap<String, TrackTags> {
+    private fun load(context: Context): Map<String, TrackTags> {
         cache?.let { return it }
         val map = LinkedHashMap<String, TrackTags>()
         val f = file(context)
@@ -281,8 +345,9 @@ object MusicTags {
     /** Сохраняет пачку тегов и просит таблицу Музыка.xlsx обновиться (с задержкой). */
     @Synchronized
     fun putAll(context: Context, tags: Map<String, TrackTags>, export: Boolean = true) {
-        val map = loaded(context)
+        val map = LinkedHashMap(loaded(context))
         map.putAll(tags)
+        cache = map
         persist(context, map)
         if (export) MusicCatalog.scheduleExport(context)
     }
@@ -294,7 +359,7 @@ object MusicTags {
         val base = loaded(context)[key]
             ?: TrackTags(genre = "other", mood = "calm", energy = 3, confidence = 0, artist = track.artist, title = track.title, album = track.album)
         var updated = change(base)
-        if (manual) updated = updated.copy(edited = true, confidence = 100, source = TrackTags.SOURCE_USER)
+        if (manual) updated = updated.copy(edited = true, confidence = 100, source = TrackTags.SOURCE_USER, moodScores = emptyMap(), segments = emptyList())
         val withNames = updated.copy(
             artist = updated.artist.ifBlank { track.artist }, title = updated.title.ifBlank { track.title },
             album = updated.album.ifBlank { track.album }
@@ -331,7 +396,7 @@ object MusicTags {
      */
     @Synchronized
     fun resetAuto(context: Context): Int {
-        val map = loaded(context)
+        val map = LinkedHashMap(loaded(context))
         var n = 0
         val it = map.entries.iterator()
         val keep = LinkedHashMap<String, TrackTags>()
@@ -343,6 +408,7 @@ object MusicTags {
             if (v.liked != 0) keep[k] = TrackTags("other", "calm", 3, confidence = 0, artist = v.artist, title = v.title, album = v.album, liked = v.liked)
         }
         map.putAll(keep)
+        cache = map
         persist(context, map)
         return n
     }
@@ -350,12 +416,12 @@ object MusicTags {
     /** Снимает пометку «ИИ уже пробовал» у неразмеченных песен, чтобы разметка попробовала их ещё раз. */
     @Synchronized
     fun resetFailed(context: Context): Int {
-        val map = loaded(context)
+        val map = LinkedHashMap(loaded(context))
         var n = 0
         for ((k, v) in map.entries.toList()) {
             if (!isTagged(v) && v.aiTried) { map[k] = v.copy(aiTried = false); n++ }
         }
-        if (n > 0) persist(context, map)
+        if (n > 0) { cache = map; persist(context, map) }
         return n
     }
 

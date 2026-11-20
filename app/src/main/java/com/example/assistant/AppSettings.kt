@@ -115,5 +115,9 @@ class AssistantApp : android.app.Application() {
         super.onCreate()
         AppSettings.applyTheme(this)
         Shell.backend = ShizukuShell
+        // Встроенный плеер (Harmonia): папка таблицы, настройки плеера и журнал воспроизведения
+        MusicFiles.init(this)
+        MusicSettings.init(this)
+        PlayLog.init(this)
     }
 }
