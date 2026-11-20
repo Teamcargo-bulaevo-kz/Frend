@@ -269,8 +269,61 @@ object MusicActions {
     }
 
     /** Управление плеером: наш плеер, а если он не играет — медиакнопки для любого другого. */
-    fun control(context: Context, action: String): String {
+    private fun onMain(block: () -> Unit) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) block()
+        else android.os.Handler(android.os.Looper.getMainLooper()).post(block)
+    }
+
+    /** Что играет: название, исполнитель и что о песне известно. */
+    fun nowPlaying(context: Context): String {
+        val t = PlayerState.track ?: return "Сейчас ничего не играет"
+        val tags = MusicTags.get(context, t)
+        val about = buildList {
+            if (tags != null && MusicTags.isTagged(tags)) {
+                tags.genreText.takeIf { it.isNotBlank() && tags.genre != "other" }?.let { add(it.lowercase()) }
+                add(tags.moods.joinToString(", ") { MusicTags.moods[it]?.lowercase() ?: it })
+                if (tags.bpm > 0) add("${tags.bpm} BPM")
+            }
+            PlayerState.wave?.let { add(it.title().lowercase()) }
+        }.filter { it.isNotBlank() }
+        val name = if (t.artist.isBlank() || t.artist.equals("<unknown>", true)) "«${t.title}»" else "${t.artist} — «${t.title}»"
+        return "Играет $name" + if (about.isEmpty()) "" else " (${about.joinToString(", ")})"
+    }
+
+    /** Управление встроенным плеером без модели: перемешать, повтор, перемотка, с начала, таймер сна. */
+    private fun extraControl(context: Context, a: String, amount: Int?): String? {
+        val service = MusicService.instance
+        when (a) {
+            "now_playing", "what" -> return nowPlaying(context)
+            "shuffle", "repeat", "repeat_one", "seek", "restart", "sleep" -> {}
+            else -> return null
+        }
+        if (service == null || PlayerState.track == null) return "Сейчас ничего не играет"
+        return when (a) {
+            "shuffle" -> { onMain { service.toggleShuffle() }; if (PlayerState.shuffle) "Выключил перемешивание" else "Перемешал очередь" }
+            "repeat" -> { onMain { service.cycleRepeat() }; "Режим повтора переключён" }
+            "repeat_one" -> {
+                onMain { var guard = 0; while (PlayerState.repeat != PlayerState.REPEAT_ONE && guard++ < 3) service.cycleRepeat() }
+                "Повторяю эту песню"
+            }
+            "seek" -> {
+                val delta = (amount ?: 15) * 1000
+                onMain { service.seekTo((PlayerState.position() + delta).coerceAtLeast(0)) }
+                if (delta >= 0) "Перемотал вперёд на ${delta / 1000} с" else "Перемотал назад на ${-delta / 1000} с"
+            }
+            "restart" -> { onMain { service.seekTo(0) }; "Сначала" }
+            "sleep" -> {
+                val m = (amount ?: 30).coerceIn(0, 600)
+                onMain { service.setSleepTimer(m) }
+                if (m == 0) "Таймер сна выключен" else "Музыка остановится через $m мин"
+            }
+            else -> null
+        }
+    }
+
+    fun control(context: Context, action: String, amount: Int? = null): String {
         val a = action.trim().lowercase()
+        extraControl(context, a, amount)?.let { return it }
         val serviceAction = when (a) {
             "pause" -> MusicService.ACTION_PAUSE
             "play", "resume" -> MusicService.ACTION_RESUME

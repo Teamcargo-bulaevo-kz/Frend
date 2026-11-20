@@ -322,4 +322,18 @@ class LocalCommandsTest {
         assertCmd("не нравится", "music_rate", "action" to "dislike")
         assertCmd("включи песню волны", "play_music", "query" to "волны", "shuffle" to false)
     }
+
+    @Test fun playerExtraAndCalc() {
+        assertCmd("что сейчас играет", "music_control", "action" to "now_playing")
+        assertCmd("кто поёт", "music_control", "action" to "now_playing")
+        assertCmd("перемешай", "music_control", "action" to "shuffle")
+        assertCmd("повтори эту песню", "music_control", "action" to "repeat_one")
+        assertCmd("перемотай вперёд на 30 секунд", "music_control", "action" to "seek", "amount" to 30)
+        assertCmd("перемотай назад на минуту", "music_control", "action" to "seek", "amount" to -60)
+        assertCmd("таймер сна на 20 минут", "music_control", "action" to "sleep", "amount" to 20)
+        assertCmd("выключи музыку через час", "music_control", "action" to "sleep", "amount" to 60)
+        assertCmd("сколько будет 2 плюс 2", "calculate", "expression" to "2+2")
+        // обычный таймер не сломан
+        assertCmd("таймер на 10 минут", "set_timer", "seconds" to 600)
+    }
 }

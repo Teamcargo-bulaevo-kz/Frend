@@ -41,6 +41,8 @@ object LocalCommands {
 
         // Заметки: единственные команды, где текст может быть длинным
         parseNote(text, t)?.let { return it }
+        // Калькулятор: «сколько будет 25 умножить на 4» (знаки и цифры нужны как есть, поэтому по исходному тексту)
+        Calc.extract(text)?.let { return LocalCommand("calculate", mapOf("expression" to it)) }
 
         if (w.size > 12) return null
         // В фразе есть имя файла (clients.csv): это для модели и общей папки, а не для правил
@@ -57,6 +59,7 @@ object LocalCommands {
         parseBrightness(t, w)?.let { return it }
         parseVolume(t, w)?.let { return it }
         parsePlayerControl(t)?.let { return it }
+        parsePlayerExtra(t, w)?.let { return it }
         parseWave(t)?.let { return it }
         parseRate(t)?.let { return it }
         parsePlaylistAndLibrary(t)?.let { return it }
@@ -171,6 +174,7 @@ object LocalCommands {
     /** «Поставь таймер на 10 минут», «таймер на полчаса», «таймер 30 секунд». */
     private fun parseTimer(w: List<String>): LocalCommand? {
         if (w.none { it.startsWith("таймер") }) return null
+        if (w.any { it == "сна" }) return null // «таймер сна» — это плеер
         if (w.any { it in alarmBlockers || it.startsWith("останов") || it.startsWith("сброс") }) return null
         var seconds = 0
         var found = false
@@ -474,6 +478,52 @@ object LocalCommands {
         ) {
             return LocalCommand("music_library")
         }
+        return null
+    }
+
+    // ---------------------------------------------------------------- плеер: что играет, перемотка, повтор, таймер сна
+
+    private val nowPlayingPhrases = setOf(
+        "что играет", "что сейчас играет", "что за песня", "что это за песня", "какая песня играет", "какая это песня",
+        "как называется песня", "как называется эта песня", "кто поет", "кто это поет", "кто исполняет", "что за трек", "какой это трек"
+    )
+
+    private fun parsePlayerExtra(t: String, w: List<String>): LocalCommand? {
+        if (t in nowPlayingPhrases) return LocalCommand("music_control", mapOf("action" to "now_playing"))
+        if (t in setOf("перемешай", "перемешай песни", "перемешай очередь", "включи перемешивание", "вперемешку"))
+            return LocalCommand("music_control", mapOf("action" to "shuffle"))
+        if (t in setOf("повтори песню", "повтори эту песню", "повторяй эту песню", "поставь на повтор", "на повтор", "включи повтор", "повторяй"))
+            return LocalCommand("music_control", mapOf("action" to "repeat_one"))
+        if (t in setOf("сначала", "с начала", "включи сначала", "включи с начала", "заново", "песню сначала", "начни сначала"))
+            return LocalCommand("music_control", mapOf("action" to "restart"))
+        // «перемотай вперёд на 30 секунд», «назад на минуту», «мотни вперёд»
+        if (w.isNotEmpty() && (w[0].startsWith("перемот") || w[0].startsWith("мотни") || w[0] == "промотай")) {
+            val back = w.any { it == "назад" }
+            var sec = 15
+            for (i in w.indices) {
+                val n = number(w, i) ?: continue
+                val unit = w.getOrNull(i + n.second).orEmpty()
+                sec = if (unit.startsWith("мин")) n.first * 60 else n.first
+                break
+            }
+            if (w.any { it == "минуту" } && w.none { it.toIntOrNull() != null || it in numberWords }) sec = 60
+            return LocalCommand("music_control", mapOf("action" to "seek", "amount" to if (back) -sec else sec))
+        }
+        // «таймер сна на 30 минут», «выключи музыку через 20 минут»
+        val sleep = t.startsWith("таймер сна") || (t.startsWith("выключи музыку через") || t.startsWith("останови музыку через"))
+        if (sleep) {
+            if (t == "таймер сна") return LocalCommand("music_control", mapOf("action" to "sleep", "amount" to 30))
+            for (i in w.indices) {
+                val n = number(w, i) ?: continue
+                val unit = w.getOrNull(i + n.second).orEmpty()
+                val min = if (unit.startsWith("час")) n.first * 60 else n.first
+                return LocalCommand("music_control", mapOf("action" to "sleep", "amount" to min))
+            }
+            if (w.any { it == "час" }) return LocalCommand("music_control", mapOf("action" to "sleep", "amount" to 60))
+            if (w.any { it == "полчаса" }) return LocalCommand("music_control", mapOf("action" to "sleep", "amount" to 30))
+        }
+        if (t in setOf("выключи таймер сна", "отмени таймер сна", "убери таймер сна"))
+            return LocalCommand("music_control", mapOf("action" to "sleep", "amount" to 0))
         return null
     }
 

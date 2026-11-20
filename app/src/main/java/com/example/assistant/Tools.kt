@@ -110,8 +110,13 @@ object Tools {
             ))
             put(tool(
                 "music_control",
-                "Управляет воспроизведением музыки: пауза, продолжить, следующий трек, предыдущий трек, стоп.",
-                listOf("action" to choice("Что сделать", listOf("pause", "play", "next", "previous", "stop"))),
+                "Управляет воспроизведением музыки: пауза, продолжить, следующий, предыдущий, стоп, now_playing — что играет, " +
+                    "shuffle — перемешать, repeat_one — повторять песню, repeat — переключить повтор, seek — перемотка на amount секунд (минус — назад), " +
+                    "restart — с начала, sleep — таймер сна на amount минут (0 — выключить).",
+                listOf(
+                    "action" to choice("Что сделать", listOf("pause", "play", "next", "previous", "stop", "now_playing", "shuffle", "repeat", "repeat_one", "seek", "restart", "sleep")),
+                    "amount" to number("Для seek: секунды (минус — назад); для sleep: минуты")
+                ),
                 listOf("action")
             ))
             put(tool(

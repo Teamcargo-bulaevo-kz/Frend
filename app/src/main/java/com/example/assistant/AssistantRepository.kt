@@ -382,7 +382,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                     a.optStringOrNull("mood"), a.optStringOrNull("genre"), a.optBoolean("liked", false)
                 )
             }
-            "music_control" -> MusicActions.control(context, a.optString("action", ""))
+            "music_control" -> MusicActions.control(context, a.optString("action", ""), a.optIntOrNull("amount"))
+            "calculate" -> a.optString("expression").let { e -> Calc.eval(e)?.let { "${e.replace("*", " × ").replace("/", " ÷ ")} = ${Calc.format(it)}" } ?: "Не смог посчитать «$e»" }
             "music_wave" -> withContext(Dispatchers.IO) {
                 MusicActions.wave(context, a.optString("kind", "my_wave"), a.optStringOrNull("mood"), a.optStringOrNull("preset"), a.optStringOrNull("query"))
             }
