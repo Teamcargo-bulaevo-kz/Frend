@@ -67,6 +67,20 @@ object Tools {
                 )
             ))
             put(tool(
+                "music_wave",
+                "Умная музыка под вкус пользователя (без интернета): my_wave — бесконечная «Моя волна» по лайкам и прослушиваниям; " +
+                    "mood — бесконечная волна с настроением; similar — похожие на песню (или на ту, что играет); " +
+                    "preset — готовая подборка под занятие; now — под текущее время суток; taste — рассказать о вкусе пользователя; " +
+                    "dislike_skip — песня не нравится, пропустить и реже ставить похожие; discover — новые для пользователя песни под его вкус.",
+                listOf(
+                    "kind" to choice("Что сделать", listOf("my_wave", "mood", "similar", "preset", "now", "taste", "dislike_skip", "discover")),
+                    "mood" to choice("Для mood: настроение", MusicTags.moods.keys.toList()),
+                    "preset" to choice("Для preset: занятие", MusicRecommender.presets.map { it.key }),
+                    "query" to text("Для similar: название песни-образца; пусто — та, что играет")
+                ),
+                listOf("kind")
+            ))
+            put(tool(
                 "music_rate",
                 "Лайк, дизлайк и ручная правка характеристик песни. like — понравилась, dislike — не нравится (в подборки не попадёт), " +
                     "clear — снять оценку, info — что известно о песне, tag — изменить настроение, жанр, энергичность или темп. " +
@@ -391,7 +405,7 @@ object Tools {
 
     private val groups: Map<String, List<String>> = mapOf(
         "alarm" to listOf("set_alarm"),
-        "music" to listOf("play_music", "music_control", "set_volume", "playlist", "music_library", "music_tags", "music_rate"),
+        "music" to listOf("play_music", "music_wave", "music_control", "set_volume", "playlist", "music_library", "music_tags", "music_rate"),
         "notes" to listOf("create_note", "list_notes", "search_notes", "delete_note"),
         "phone" to listOf(
             "flashlight", "open_camera", "take_screenshot", "open_app", "open_browser",
@@ -415,7 +429,8 @@ object Tools {
             "музык", "песн", "трек", "плейлист", "громк", "тише", "громче", "потише", "погромче", "пауз",
             "дальше", "следующ", "предыдущ", "играй", "альбом", "исполнител", "групп", "звук", "артист",
             "настроени", "жанр", "разметк", "размет", "импорт", "таблиц", "другого ии", "другой ии", "энергичн", "спокойн", "весел", "грустн",
-            "лайк", "дизлайк", "нравит", "понравил", "любим", "папк", "коллекц", "эту песню", "эта песня"
+            "лайк", "дизлайк", "нравит", "понравил", "любим", "папк", "коллекц", "эту песню", "эта песня",
+            "волн", "похож", "вкус", "подборк", "для бега", "для сна", "в дорогу", "тренировк"
         ),
         "notes" to listOf("заметк", "запомн", "запиш", "сохран", "удал"),
         "phone" to listOf(

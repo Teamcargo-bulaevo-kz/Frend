@@ -57,6 +57,7 @@ object LocalCommands {
         parseBrightness(t, w)?.let { return it }
         parseVolume(t, w)?.let { return it }
         parsePlayerControl(t)?.let { return it }
+        parseWave(t)?.let { return it }
         parseRate(t)?.let { return it }
         parsePlaylistAndLibrary(t)?.let { return it }
         parseMusicPlay(t)?.let { return it }
@@ -472,6 +473,68 @@ object LocalCommands {
             )
         ) {
             return LocalCommand("music_library")
+        }
+        return null
+    }
+
+    // ---------------------------------------------------------------- волны и подборки
+
+    private val myWavePhrases = setOf(
+        "моя волна", "мою волну", "волна", "волну", "включи волну", "включи мою волну", "поставь мою волну", "запусти мою волну",
+        "запусти волну", "поставь волну", "включи что нибудь на мой вкус", "поставь что нибудь на мой вкус", "на мой вкус",
+        "включи мою музыку", "включи что нибудь хорошее", "поставь что нибудь хорошее", "включи то что я люблю"
+    )
+    private val similarPhrases = setOf(
+        "похожее", "похожие", "еще такое", "ещё такое", "еще такого", "ещё такого", "включи похожее", "включи похожие",
+        "поставь похожее", "поставь похожие", "похожие песни", "включи похожие песни", "что нибудь похожее", "включи что нибудь похожее",
+        "поставь что нибудь похожее", "похожее на эту", "включи похожее на эту", "похожие на эту", "включи похожие на эту",
+        "еще похожие", "ещё похожие", "больше такого", "включи еще такое", "включи ещё такое", "давай еще такое", "давай ещё такое"
+    )
+    private val dislikeSkipPhrases = setOf(
+        "не нравится дальше", "не нравится следующую", "не нравится переключи", "не то", "не то дальше", "это не то",
+        "переключи не нравится", "дальше не нравится", "пропусти не нравится", "не мое", "не моё", "не мое дальше", "не моё дальше",
+        "убери эту песню", "надоела", "надоела эта песня"
+    )
+    private val tastePhrases = setOf(
+        "какой у меня вкус", "какой у меня музыкальный вкус", "мой музыкальный вкус", "что я люблю слушать",
+        "какую музыку я люблю", "что мне нравится из музыки", "расскажи о моем вкусе", "расскажи о моём вкусе"
+    )
+    private val discoverPhrases = setOf(
+        "включи что нибудь новое", "поставь что нибудь новое", "что нибудь новенькое", "включи новенькое", "открытия",
+        "включи открытия", "то что я не слушал", "включи то что я не слушал"
+    )
+
+    /** «Моя волна», «похожее», «музыку для бега», «под настроение», «не нравится, дальше», «какой у меня вкус». */
+    private fun parseWave(t: String): LocalCommand? {
+        if (t in myWavePhrases) return LocalCommand("music_wave", mapOf("kind" to "my_wave"))
+        if (t in similarPhrases) return LocalCommand("music_wave", mapOf("kind" to "similar"))
+        if (t in dislikeSkipPhrases) return LocalCommand("music_wave", mapOf("kind" to "dislike_skip"))
+        if (t in tastePhrases) return LocalCommand("music_wave", mapOf("kind" to "taste"))
+        if (t in discoverPhrases) return LocalCommand("music_wave", mapOf("kind" to "discover"))
+        val w = t.split(' ')
+        if (w.size < 2 || w[0] !in playVerbs) return null
+        val rest = w.drop(1).let { if (it.firstOrNull() == "мне") it.drop(1) else it }.joinToString(" ")
+        // «включи волну спокойную», «включи волну с грустным настроением»
+        if (rest.startsWith("волну ") || rest.startsWith("мою волну ")) {
+            val mood = MusicTags.moodFromWords(rest) ?: return LocalCommand("music_wave", mapOf("kind" to "my_wave"))
+            return LocalCommand("music_wave", mapOf("kind" to "mood", "mood" to mood))
+        }
+        // «включи что-нибудь под настроение», «музыку под время»
+        if (rest.endsWith("под настроение") || rest.endsWith("по настроению") || rest.endsWith("под это время") || rest.endsWith("под время суток")) {
+            return LocalCommand("music_wave", mapOf("kind" to "now"))
+        }
+        // «включи песни похожие на Believer»
+        Regex("^(?:песни |музыку |что нибудь |треки )?похож(?:ее|ие|ую) на (.+)$").find(rest)?.let { m ->
+            val q = m.groupValues[1].trim()
+            return if (q in setOf("эту", "эту песню", "этот трек", "то что играет")) LocalCommand("music_wave", mapOf("kind" to "similar"))
+            else LocalCommand("music_wave", mapOf("kind" to "similar", "query" to q))
+        }
+        // «включи музыку для бега», «поставь что-нибудь в дорогу», «включи песни для сна»
+        if (rest.split(' ').size <= 5 && Regex("(^| )(для|под|в) ").containsMatchIn(" $rest")) {
+            val head = rest.split(' ').first()
+            if (head in setOf("музыку", "что", "песни", "треки", "что нибудь", "для", "под", "в", "плейлист", "подборку")) {
+                MusicWave.presetFromWords(rest)?.let { return LocalCommand("music_wave", mapOf("kind" to "preset", "preset" to it)) }
+            }
         }
         return null
     }

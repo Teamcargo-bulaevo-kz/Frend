@@ -241,7 +241,8 @@ class PlayerActivity : AppCompatActivity() {
         menu.menu.add(0, 1, 0, "Изменить характеристики")
         menu.menu.add(0, 5, 1, "Карта настроения по фрагментам")
         menu.menu.add(0, 2, 2, "Очередь")
-        menu.menu.add(0, 3, 3, "Ещё такое")
+        menu.menu.add(0, 3, 3, "Ещё такое (волна похожих)")
+        menu.menu.add(0, 10, 3, "Не нравится — дальше")
         menu.menu.add(0, 4, 4, "Таймер сна")
         menu.menu.add(0, 6, 5, if (PlayerState.shuffle) "Вперемешку: включено" else "Вперемешку: выключено")
         menu.menu.add(0, 7, 6, when (PlayerState.repeat) {
@@ -255,6 +256,7 @@ class PlayerActivity : AppCompatActivity() {
                     startActivity(Intent(this, TrackEditActivity::class.java).putExtra(TrackEditActivity.EXTRA_TRACK_ID, it.id))
                 }
                 8 -> showTrackInfo()
+                10 -> { MusicService.instance?.dislikeCurrent(); Toast.makeText(this, "Понял, такое реже", Toast.LENGTH_SHORT).show() }
                 9 -> PlayerState.track?.let { startActivity(Intent(this, CoverEditorActivity::class.java).putExtra(CoverEditorActivity.EXTRA_TRACK_ID, it.id)) }
                 5 -> showMoodTimeline()
                 2 -> showQueue()
@@ -421,30 +423,29 @@ class PlayerActivity : AppCompatActivity() {
             .setNegativeButton("Закрыть", null).show()
     }
 
-    /** «Ещё такое»: вперемешку треки с тем же настроением (или жанром), что у текущего. */
+    /** «Ещё такое»: бесконечная волна похожих по звуку, жанру и исполнителю (см. [MusicRecommender]). */
     private fun playSimilar() {
         val track = PlayerState.track ?: return
         val tg = MusicTags.get(this, track)
         if (tg == null || !MusicTags.isTagged(tg)) {
-            Toast.makeText(this, "Эта песня ещё не размечена. Разметь музыку в приложении «Музыка».", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Эта песня ещё не разобрана. Разбор идёт в приложении «Музыка».", Toast.LENGTH_LONG).show()
             return
         }
         lifecycleScope.launch {
             val similar = withContext(Dispatchers.IO) {
-                val music = MusicLibrary.index(this@PlayerActivity).allMusic()
-                val byMood = MusicTags.filter(this@PlayerActivity, music, tg.mood, null)
-                (if (byMood.size >= 5) byMood else MusicTags.filter(this@PlayerActivity, music, null, tg.genre))
-                    .filter { it.id != track.id }.shuffled().take(200)
+                val items = ListenStats.items(this@PlayerActivity)
+                val seed = items.firstOrNull { it.track.id == track.id } ?: RecItem(track, tg, null)
+                MusicRecommender.similar(seed, items, 9).map { it.track }
             }
             if (similar.isEmpty()) {
                 Toast.makeText(this@PlayerActivity, "Похожих песен не нашёл", Toast.LENGTH_SHORT).show()
                 return@launch
             }
-            MusicQueue.tracks = listOf(track) + similar
-            ContextCompat.startForegroundService(
-                this@PlayerActivity, Intent(this@PlayerActivity, MusicService::class.java).setAction(MusicService.ACTION_PLAY)
-            )
-            Toast.makeText(this@PlayerActivity, "Дальше похожие: ${MusicTags.moods[tg.mood]?.lowercase()}", Toast.LENGTH_SHORT).show()
+            val spec = WaveSpec(WaveSpec.Kind.SIMILAR, seedKey = MusicTags.trackKey(track))
+            val service = MusicService.instance
+            if (service != null && PlayerState.track?.id == track.id) service.continueAsWave(spec, similar)
+            else MusicActions.startPlayback(this@PlayerActivity, listOf(track) + similar, spec, MusicRecommender.Session())
+            Toast.makeText(this@PlayerActivity, "Дальше похожие на эту песню", Toast.LENGTH_SHORT).show()
         }
     }
 

@@ -18,8 +18,10 @@ object MusicActions {
      * Музыка стартует после того, как ассистент коротко назвал трек: сначала голос, потом музыка.
      * Если озвучки нет, начинаем почти сразу (через 0,7 с), максимум ждём 15 секунд.
      */
-    private fun startPlayback(context: Context, tracks: List<MusicTrack>) {
+    fun startPlayback(context: Context, tracks: List<MusicTrack>, wave: WaveSpec? = null, session: MusicRecommender.Session? = null) {
         MusicQueue.tracks = tracks
+        MusicQueue.wave = wave
+        MusicQueue.waveSession = session
         val app = context.applicationContext
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val began = System.currentTimeMillis()
@@ -34,6 +36,36 @@ object MusicActions {
         handler.postDelayed(check, 700L)
     }
 
+    // ---------------------------------------------------------------- волны и подборки
+
+    /** Голосовые «Моя волна», волна по настроению, похожие, подборки под занятие, вкус. */
+    fun wave(context: Context, kind: String, mood: String?, preset: String?, query: String?): String = when (kind) {
+        "mood" -> if (mood != null && mood in MusicTags.moods) MusicWave.start(context, WaveSpec(WaveSpec.Kind.MOOD, mood = mood))
+            else "Скажи настроение: спокойное, весёлое, грустное, энергичное…"
+        "similar" -> {
+            val seed = query?.takeIf { it.isNotBlank() }?.let { MusicLibrary.index(context).search(it, 1).firstOrNull() }
+            if (query != null && query.isNotBlank() && seed == null) "Не нашёл на телефоне «$query»"
+            else MusicWave.similarTo(context, seed)
+        }
+        "preset" -> {
+            val key = preset?.takeIf { p -> MusicRecommender.presets.any { it.key == p } }
+            if (key != null) MusicWave.start(context, WaveSpec(WaveSpec.Kind.PRESET, preset = key)) else MusicWave.forNow(context)
+        }
+        "now" -> MusicWave.forNow(context)
+        "taste" -> MusicRecommender.describeTaste(ListenStats.items(context))
+        "discover" -> {
+            val found = MusicRecommender.discoveries(ListenStats.items(context), 40).map { it.track }
+            if (found.isEmpty()) "Новых для тебя песен не осталось — ты всё уже слушал."
+            else { startPlayback(context, found); "Включаю открытия: «${SpeechText.shortTitle(found.first().title)}», всего ${found.size}" }
+        }
+        "dislike_skip" -> {
+            val service = MusicService.instance
+            if (service == null || PlayerState.track == null) "Сейчас ничего не играет"
+            else { android.os.Handler(android.os.Looper.getMainLooper()).post { service.dislikeCurrent() }; "Понял, пропускаю и буду ставить такое реже" }
+        }
+        else -> MusicWave.start(context, WaveSpec(WaveSpec.Kind.MY_WAVE))
+    }
+
     // ---------------------------------------------------------------- воспроизведение
 
     fun playMusic(
@@ -43,6 +75,8 @@ object MusicActions {
         if (liked) return playLiked(context, index.allMusic(), mood, genre)
         if (mood != null || genre != null) return playByTags(context, index.allMusic(), mood, genre)
         val blank = query.isBlank()
+        // «Включи музыку» без уточнений: «Моя волна», если музыка уже разобрана (иначе вперемешку, как раньше)
+        if (blank && MusicTags.count(context) >= 10) return MusicWave.start(context, WaveSpec(WaveSpec.Kind.MY_WAVE))
         val found = if (blank) index.allMusic() else index.search(query, 100)
         if (found.isEmpty()) {
             return if (blank) NO_ACCESS else "Не нашёл на телефоне ничего похожего на «$query»"
@@ -64,6 +98,11 @@ object MusicActions {
         if (MusicTags.count(context) == 0) {
             val started = MusicTagger.start(context)
             return "Музыка ещё не размечена по настроению и жанру. $started Когда будет готово, повтори просьбу."
+        }
+        // Только настроение — бесконечная волна с этим настроением (учитывает вкус и долю настроения в песне)
+        if (mood != null && genre == null) {
+            val result = MusicWave.start(context, WaveSpec(WaveSpec.Kind.MOOD, mood = mood))
+            if (MusicWave.lastStarted) return result
         }
         val found = MusicTags.filter(context, music, mood, genre)
         if (found.isEmpty()) {

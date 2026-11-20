@@ -19,10 +19,12 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Сам размечает музыку: жанр из ID3, настроения по акустике, энергичность и темп.
+ * Сам размечает музыку в два этапа:
  * 1) читает таблицу Музыка.xlsx, если она уже есть (после переустановки);
- * 2) декодирует аудио и оценивает акустические признаки локальным алгоритмом;
- * интернет и внешние модели не нужны.
+ * 2) декодирует аудио и измеряет темп, энергию и профиль настроений прямо на телефоне;
+ * 3) уточняет жанр и характер песни по названию и исполнителю: серверный анализатор, если он настроен,
+ *    иначе модель Groq (тот же ключ, что у ассистента). Результаты сводятся в [MoodFusion].
+ * Без интернета работает этап 2, этап 3 продолжится позже.
  * Идёт в фоне (служба с уведомлением), делает паузы при лимитах и в конце присылает уведомление.
  */
 object MusicTagger {
@@ -33,6 +35,8 @@ object MusicTagger {
     private const val DONE_NOTIFICATION_ID = 2004
     private const val PREFS = "music_tagger"
     private const val KEY_LAST_AUTO = "last_auto"
+    private const val KEY_BLOCKED_UNTIL = "blocked_until"
+    private const val AI_BATCH = 30
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val processing = AtomicBoolean(false)
@@ -80,7 +84,8 @@ object MusicTagger {
         if (mode == Mode.NEW && untaggedCount(app, music) == 0 && MusicTags.resetFailed(app) > 0) effective = Mode.RETRY
         if (mode == Mode.RETRY) MusicTags.resetFailed(app)
         val untagged = untaggedCount(app, music)
-        val serverPending = if (ServerMusicAnalyzer.isConfigured()) serverPendingCount(app, music) else 0
+        prefs(app).edit().remove(KEY_BLOCKED_UNTIL).apply()
+        val serverPending = metaPendingCount(app, music)
         if (untagged == 0 && serverPending == 0) {
             return "Все ${music.size} треков уже размечены и проверены доступными анализаторами. " +
                 "Чтобы выполнить анализ заново, скажи «разметь музыку заново»."
@@ -89,7 +94,7 @@ object MusicTagger {
         val what = when {
             effective == Mode.REDO -> "Размечаю заново (твои правки и оценки сохранены)"
             effective == Mode.RETRY -> "Повторяю неопознанные"
-            untagged == 0 -> "Уточняю уже размеченные песни через серверный ИИ"
+            untagged == 0 -> "Уточняю жанры и настроение по названиям через ИИ"
             else -> "Начал разметку"
         }
         val workCount = if (untagged > 0) untagged else serverPending
@@ -108,10 +113,11 @@ object MusicTagger {
             val p = prefs(app)
             val now = System.currentTimeMillis()
             if (now - p.getLong(KEY_LAST_AUTO, 0L) < 10 * 60_000L) return@launch
+            val blocked = now < p.getLong(KEY_BLOCKED_UNTIL, 0L)
             val music = MusicLibrary.index(app).allMusic()
             if (music.isEmpty()) return@launch
             val untagged = untaggedCount(app, music)
-            val serverPending = if (ServerMusicAnalyzer.isConfigured()) serverPendingCount(app, music) else 0
+            val serverPending = if (blocked) 0 else metaPendingCount(app, music)
             if (untagged == 0 && serverPending == 0) {
                 // Таблица должна существовать и после полной разметки
                 if (!MusicCatalog.file().exists() && MusicTags.count(app) > 0) MusicCatalog.scheduleExport(app)
@@ -143,17 +149,26 @@ object MusicTagger {
         var untagged = 0
         for (t in music) {
             if (!seen.add(MusicTags.trackKey(t))) continue
-            val tags = MusicTags.get(context, t)
-            if (!MusicTags.isTagged(tags) && tags?.aiTried != true) untagged++
+            if (needsAudio(MusicTags.get(context, t))) untagged++
         }
         return untagged
     }
 
-    private fun serverPendingCount(context: Context, music: List<MusicTrack>): Int =
-        music.distinctBy { MusicTags.trackKey(it) }.count { track ->
-            val tags = MusicTags.get(context, track)
-            tags?.edited != true && tags?.webTried != true
-        }
+    /** Звук ещё не измеряли: нет разметки или есть только мнение ИИ по названию (старые теги Frend). */
+    fun needsAudio(tags: TrackTags?): Boolean =
+        tags == null || (!tags.edited && !tags.hasAudio && !tags.audioTried)
+
+    /** Нужно ли уточнение по метаданным: не правилось руками и ещё не уточнялось. */
+    private fun needsMeta(tags: TrackTags?): Boolean =
+        tags?.edited != true && tags?.webTried != true &&
+            tags?.source != TrackTags.SOURCE_IMPORT && tags?.source != TrackTags.SOURCE_AI
+
+    private fun groqAvailable() = BuildConfig.GROQ_API_KEY.isNotBlank()
+
+    private fun metaPendingCount(context: Context, music: List<MusicTrack>): Int {
+        if (!ServerMusicAnalyzer.isConfigured() && !groqAvailable()) return 0
+        return music.distinctBy { MusicTags.trackKey(it) }.count { needsMeta(MusicTags.get(context, it)) }
+    }
 
     // ---------------------------------------------------------------- работа
 
@@ -177,7 +192,14 @@ object MusicTagger {
         try { MusicCatalog.syncOnStart(context) } catch (_: Exception) {}
         val music = MusicLibrary.index(context, force = true).allMusic()
         phaseLocal(context, music)
-        phaseServer(context, music)
+        if (ServerMusicAnalyzer.isConfigured()) phaseServer(context, music)
+        else if (groqAvailable() && System.currentTimeMillis() >= prefs(context).getLong(KEY_BLOCKED_UNTIL, 0L)) {
+            try { phaseGroq(context, music) } catch (e: Stop) {
+                lastError = e.reason
+                val pause = if (e.reason.contains("сегодня")) 6 * 3_600_000L else 40 * 60_000L
+                prefs(context).edit().putLong(KEY_BLOCKED_UNTIL, System.currentTimeMillis() + pause).apply()
+            }
+        }
         try { MusicCatalog.exportNow(context) } catch (_: Exception) {}
     }
 
@@ -229,11 +251,9 @@ object MusicTagger {
 
     /** Офлайн-разметка: декодируем до четырёх минут аудио с пониженной частотой дискретизации и считаем распределение настроений. */
     private suspend fun phaseLocal(context: Context, music: List<MusicTrack>) {
-        val todo = music.distinctBy { MusicTags.trackKey(it) }.filter {
-            val tags = MusicTags.get(context, it)
-            !MusicTags.isTagged(tags) && tags?.aiTried != true
-        }
-        phase = "Анализирую звук локально"
+        val todo = music.distinctBy { MusicTags.trackKey(it) }.filter { needsAudio(MusicTags.get(context, it)) }
+        if (todo.isEmpty()) return
+        phase = "Слушаю песни: темп, энергия, настроение"
         total = todo.size
         done = 0
         notifyProgress(context)
@@ -292,22 +312,117 @@ object MusicTagger {
                 result.bpm >= 120 -> MusicTags.tempos["fast"].orEmpty()
                 else -> ""
             }
-            TrackTags(
+            val audio = TrackTags(
                 genre = genre, mood = primary, energy = result.energy, moods = moods,
                 genreLabel = genreText, tempo = tempo, description = result.description,
                 confidence = result.confidence, source = TrackTags.SOURCE_LOCAL,
                 liked = old?.liked ?: 0, artist = track.artist, title = track.title,
                 album = track.album, moodScores = result.scores, segments = result.segments,
                 bpm = result.bpm, valence = result.valence, arousal = result.arousal,
-                tension = result.tension, danceability = result.danceability
+                tension = result.tension, danceability = result.danceability, audioTried = true
             )
+            // Уже есть мнение ИИ (старая разметка Frend или импорт): сводим его со звуком, а не выбрасываем
+            val aiOpinion = old?.takeIf { !it.edited && it.confidence > 0 && it.source != TrackTags.SOURCE_LOCAL }
+            if (aiOpinion != null) MoodFusion.fuse(audio, aiOpinion).copy(source = aiOpinion.source) else audio
         } catch (e: Exception) {
             lastError = e.message?.take(80) ?: "не удалось прочитать один из файлов"
             (old ?: TrackTags(
                 genre = "other", mood = "calm", energy = 3, confidence = 0,
                 artist = track.artist, title = track.title, album = track.album
-            )).copy(aiTried = true)
+            )).copy(audioTried = true)
         }
+    }
+
+    // ---------------------------------------------------------------- уточнение через Groq
+
+    private class Stop(val reason: String) : Exception(reason)
+
+    private val junkAlbums = setOf("download", "downloads", "whatsapp audio", "песни", "music", "telegram", "audio", "unknown", "<unknown>")
+
+    /**
+     * Модель получает название, исполнителя, альбом, жанр из тега и то, что уже измерено по звуку (темп, энергия),
+     * и возвращает жанр, характер песни и описание. Результат сводится со звуком в [MoodFusion].
+     */
+    private suspend fun phaseGroq(context: Context, music: List<MusicTrack>) {
+        val todo = music.distinctBy { MusicTags.trackKey(it) }.filter { needsMeta(MusicTags.get(context, it)) }
+        if (todo.isEmpty()) return
+        val client = GroqClient(BuildConfig.GROQ_API_KEY)
+        phase = "Уточняю жанры и настроение через ИИ"
+        total = todo.size
+        done = 0
+        notifyProgress(context)
+        var failures = 0
+        for (batch in todo.chunked(AI_BATCH)) {
+            val answer = try {
+                withRetry { askModel(client, context, batch) }
+            } catch (e: Stop) {
+                throw e
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failures++
+                lastError = "ИИ: " + (e.message?.take(80) ?: "ошибка сети")
+                if (failures >= 3) throw Stop("не получается связаться с моделью, продолжу позже")
+                null
+            }
+            if (answer != null) {
+                failures = 0
+                val updates = LinkedHashMap<String, TrackTags>()
+                for ((i, track) in batch.withIndex()) {
+                    val key = MusicTags.trackKey(track)
+                    val current = MusicTags.get(context, track)
+                    if (current?.edited == true) continue
+                    val base = current ?: TrackTags("other", "calm", 3, confidence = 0, artist = track.artist, title = track.title, album = track.album)
+                    val ai = answer[i + 1]
+                    updates[key] = if (ai == null) base.copy(webTried = true)
+                    else MoodFusion.fuse(base, ai.copy(artist = track.artist, title = track.title, album = track.album))
+                }
+                if (updates.isNotEmpty()) MusicTags.putAll(context, updates)
+            }
+            done = (done + batch.size).coerceAtMost(total)
+            notifyProgress(context)
+            delay(1_500)
+        }
+    }
+
+    private suspend fun <T> withRetry(block: suspend () -> T): T {
+        var attempt = 0
+        while (true) {
+            attempt++
+            try {
+                return block()
+            } catch (e: GroqApiException) {
+                if (e.code != 429 && e.code != 503) throw e
+                val wait = retryDelayMs(e.message.orEmpty()) ?: (20_000L * attempt)
+                if (wait > 6 * 60_000L) throw Stop("лимит Groq на сегодня исчерпан, продолжу позже")
+                if (attempt >= 5) throw Stop("лимит запросов Groq, продолжу позже")
+                delay(wait + 1_000)
+            }
+        }
+    }
+
+    private fun describe(context: Context, t: MusicTrack): String {
+        val album = t.album.takeIf { it.isNotBlank() && it.lowercase() !in junkAlbums && !it.contains('.') }.orEmpty()
+        val tags = MusicTags.get(context, t)
+        val measured = if (tags?.hasAudio == true) "${tags.bpm.takeIf { it > 0 } ?: "?"} BPM, энергия ${tags.energy}/5" else ""
+        return "${t.artist.ifBlank { "?" }}|${MusicTags.cleanTitle(t.title)}|$album|${embeddedGenre(context, t)}|$measured"
+    }
+
+    private suspend fun askModel(client: GroqClient, context: Context, batch: List<MusicTrack>): Map<Int, TrackTags> {
+        val lines = batch.mapIndexed { i, t -> "${i + 1}|${describe(context, t)}" }
+        val system = "Ты музыкальный эксперт. Тебе дают песни: номер|исполнитель|название|альбом|жанр из тега файла|измерено по звуку (поля могут быть пустыми). " +
+            "Для каждой песни верни объект {\"i\":номер,\"g\":жанр из [${MusicTags.genres.keys.joinToString(",")}]," +
+            "\"gl\":\"жанр по-русски в 1–3 словах, например Латино-поп\"," +
+            "\"m\":[одно-два настроения из [${MusicTags.moods.keys.joinToString(",")}], первое главное; учитывай смысл текста песни, если её знаешь]," +
+            "\"e\":энергичность 1–5,\"t\":\"slow|medium|fast\",\"d\":\"описание до 10 слов по-русски\",\"c\":уверенность 0–100}. " +
+            "Если песню не знаешь, оцени по исполнителю, жанру тега и измерениям и поставь c ниже 40, ничего не выдумывай. " +
+            "Ответь только JSON-массивом, по объекту на каждую песню, без пояснений."
+        val messages = org.json.JSONArray()
+            .put(org.json.JSONObject().put("role", "system").put("content", system))
+            .put(org.json.JSONObject().put("role", "user").put("content", lines.joinToString("\n")))
+        val result = client.sendConversation(messages, null, effort = "low", maxTokens = 5000)
+        val text = (result as? GroqResult.FinalText)?.text ?: return emptyMap()
+        return MusicTags.parseResponse(text, TrackTags.SOURCE_AI).filterKeys { it in 1..batch.size }
     }
 
     /** Жанр берётся из ID3, если он записан в самом аудиофайле. */

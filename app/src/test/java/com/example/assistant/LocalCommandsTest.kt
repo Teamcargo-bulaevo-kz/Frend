@@ -302,4 +302,24 @@ class LocalCommandsTest {
         assertNone("прочитай файл clients.csv")
         assertNone("включил фанарик")
     }
+
+    // ---------------------------------------------------------------- волны
+
+    @Test fun musicWaves() {
+        assertCmd("включи мою волну", "music_wave", "kind" to "my_wave")
+        assertCmd("Моя волна", "music_wave", "kind" to "my_wave")
+        assertCmd("включи что-нибудь похожее", "music_wave", "kind" to "similar")
+        assertCmd("ещё такое", "music_wave", "kind" to "similar")
+        assertCmd("включи песни похожие на believer", "music_wave", "kind" to "similar", "query" to "believer")
+        assertCmd("включи музыку для бега", "music_wave", "kind" to "preset", "preset" to "run")
+        assertCmd("поставь что-нибудь в дорогу", "music_wave", "kind" to "preset", "preset" to "drive")
+        assertCmd("включи музыку для сна", "music_wave", "kind" to "preset", "preset" to "sleep")
+        assertCmd("включи волну спокойную", "music_wave", "kind" to "mood", "mood" to "calm")
+        assertCmd("не нравится, дальше", "music_wave", "kind" to "dislike_skip")
+        assertCmd("какой у меня музыкальный вкус", "music_wave", "kind" to "taste")
+        assertCmd("включи что-нибудь под настроение", "music_wave", "kind" to "now")
+        // прежние команды не сломаны
+        assertCmd("не нравится", "music_rate", "action" to "dislike")
+        assertCmd("включи песню волны", "play_music", "query" to "волны", "shuffle" to false)
+    }
 }

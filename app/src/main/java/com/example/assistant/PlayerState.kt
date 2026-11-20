@@ -15,6 +15,8 @@ object PlayerState {
     @Volatile var durationMs = 0
     @Volatile var sleepAtMs = 0L
     @Volatile var positionProvider: (() -> Int)? = null
+    /** Играет волна (Моя волна, настроение, похожие): название для экранов, null — обычная очередь. */
+    @Volatile var wave: WaveSpec? = null
 
     fun position(): Int = positionProvider?.invoke() ?: 0
 
@@ -25,6 +27,7 @@ object PlayerState {
         durationMs = 0
         sleepAtMs = 0L
         positionProvider = null
+        wave = null
     }
 
     fun formatTime(ms: Int): String {

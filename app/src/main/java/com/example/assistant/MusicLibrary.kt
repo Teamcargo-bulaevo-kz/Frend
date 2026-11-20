@@ -29,6 +29,9 @@ data class MusicTrack(
 /** Очередь воспроизведения: ассистент кладёт её сюда, а MusicService (тот же процесс) забирает. */
 object MusicQueue {
     @Volatile var tracks: List<MusicTrack> = emptyList()
+    /** Если задано, очередь — бесконечная волна: MusicService сам добавляет песни по мере игры. Забирается при ACTION_PLAY. */
+    @Volatile var wave: WaveSpec? = null
+    @Volatile var waveSession: MusicRecommender.Session? = null
 }
 
 /** Вся музыка телефона, загруженная в память. Блокирующий: вызывать с IO-потока. */

@@ -337,16 +337,9 @@ class MusicActivity : AppCompatActivity() {
         intent.removeExtra(EXTRA_ACTION)
     }
 
-    /** Подборки строятся из рассчитанных признаков; анализ и запуск музыки не вызываются. */
+    /** Подборки строятся из рассчитанных признаков (см. [MusicRecommender.presets]); анализ не вызывается. */
     private fun showSmartPlaylists() {
-        val presets: List<Pair<String, (TrackTags) -> Boolean>> = listOf(
-            "Спокойствие · вечер" to { t -> (t.moods.any { it in setOf("calm", "romantic") } || (t.moodScores["calm"] ?: 0) >= 18) && t.energy <= 3 && (t.bpm == 0 || t.bpm <= 110) },
-            "Фокус · работа" to { t -> (t.moods.contains("focus") || (t.moodScores["focus"] ?: 0) >= 18) && t.energy <= 3 && (t.bpm == 0 || t.bpm <= 125) },
-            "Заряд · тренировка" to { t -> (t.moods.any { it in setOf("energetic", "epic") } || (t.moodScores["energetic"] ?: 0) >= 18) && t.energy >= 3 && (t.bpm == 0 || t.bpm >= 105) },
-            "Танцевальный ритм" to { t -> (t.moods.contains("dance") || (t.moodScores["dance"] ?: 0) >= 18) && t.danceability >= 45 && (t.bpm == 0 || t.bpm in 95..160) },
-            "Светлое настроение" to { t -> (t.moods.contains("happy") || (t.moodScores["happy"] ?: 0) >= 18) && t.valence >= 55 && t.energy >= 2 },
-            "Мягкая энергия" to { t -> t.energy in 2..3 && t.tension <= 55 && (t.moodScores["calm"] ?: 0) >= 10 && (t.moodScores["energetic"] ?: 0) >= 10 }
-        )
+        val presets: List<Pair<String, (TrackTags) -> Boolean>> = MusicRecommender.presets.map { it.title to it.matches }
         val available = presets.map { (name, predicate) ->
             name to allTracks.filter { track ->
                 val tags = MusicTags.get(this, track)
@@ -704,11 +697,66 @@ class MusicActivity : AppCompatActivity() {
     private fun collectionRows(): List<Row> {
         val liked = allTracks.filter { MusicTags.likedOf(this, it) > 0 }
         val result = ArrayList<Row>()
+        result.add(Row("Для тебя", "", header = true) {})
+        result.add(Row("Моя волна", "Бесконечно, под твой вкус; учится на лайках и пропусках", badge = "∿", badgeColor = 0xFF6B5CFF.toInt()) { startWave(WaveSpec(WaveSpec.Kind.MY_WAVE)) })
+        result.add(Row("Волна по настроению", "Выбери настроение — дальше само", badge = "☯", badgeColor = 0xFF2EC4B6.toInt()) { chooseMoodWave() })
+        result.add(Row("Под это время", timePresetTitle(), badge = "◷", badgeColor = 0xFFF4A261.toInt()) { startWave(WaveSpec(WaveSpec.Kind.PRESET, preset = MusicRecommender.presetForHour(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)))) })
+        result.add(Row("Открытия", "Ни разу не слушал, но тебе подойдёт", badge = "✦", badgeColor = 0xFF4D9DE0.toInt()) { showRecommended("Открытия") { items -> MusicRecommender.discoveries(items, 60) } })
+        result.add(Row("Забытое любимое", "Нравилось, но давно не звучало", badge = "↺", badgeColor = 0xFFB5838D.toInt()) { showRecommended("Забытое любимое") { items -> MusicRecommender.forgotten(items, 60) } })
+        result.add(Row("Чаще всего", "Что ты дослушиваешь", badge = "▲", badgeColor = 0xFF7FB069.toInt()) { showRecommended("Чаще всего") { items -> MusicRecommender.topPlayed(items, 60) } })
+        result.add(Row("Мой вкус", "Что я о нём понял", badge = "?", badgeColor = 0xFF55556A.toInt()) { showTaste() })
+        result.add(Row("Подборки", "", header = true) {})
         result.add(Row("Понравившиеся", "${liked.size} песен", badge = "♥", badgeColor = 0xFFE76F9A.toInt()) { openGroup("Понравившиеся", liked) })
         result += groupRows(allTracks.groupBy { MusicTags.get(this, it)?.takeIf { t -> MusicTags.isTagged(t) }?.mood }, MusicTags.moods, moodEmoji, multiMood = true)
         result += folderRows()
-        result.add(Row("Умные подборки", "Вечер, работа, тренировка, танцы", badge = "★", badgeColor = 0xFF7C5CFF.toInt()) { showSmartPlaylists() })
+        result.add(Row("Умные подборки", "Утро, работа, бег, дорога, сон и своя", badge = "★", badgeColor = 0xFF7C5CFF.toInt()) { showSmartPlaylists() })
         return result
+    }
+
+    // ---------------------------------------------------------------- рекомендации
+
+    private fun timePresetTitle(): String {
+        val key = MusicRecommender.presetForHour(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+        return MusicRecommender.presets.firstOrNull { it.key == key }?.title.orEmpty()
+    }
+
+    private fun startWave(spec: WaveSpec) {
+        lifecycleScope.launch {
+            val text = withContext(Dispatchers.IO) { try { MusicWave.start(this@MusicActivity, spec) } catch (e: Exception) { "Не получилось: ${e.message}" } }
+            Toast.makeText(this@MusicActivity, text, Toast.LENGTH_SHORT).show()
+            if (MusicWave.lastStarted) handler.postDelayed({ openPlayer() }, 900)
+        }
+    }
+
+    private fun chooseMoodWave() {
+        val keys = MusicTags.moods.keys.toList()
+        val labels = keys.map { (moodEmoji[it] ?: "🎵") + "  " + MusicTags.moods[it] }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("Какое настроение?")
+            .setItems(labels) { _, which -> startWave(WaveSpec(WaveSpec.Kind.MOOD, mood = keys[which])) }
+            .setNegativeButton("Отмена", null).show()
+    }
+
+    private fun showRecommended(title: String, pick: (List<RecItem>) -> List<RecItem>) {
+        lifecycleScope.launch {
+            val tracks = withContext(Dispatchers.IO) { pick(ListenStats.items(this@MusicActivity, allTracks)).map { it.track } }
+            if (tracks.isEmpty()) {
+                Toast.makeText(this@MusicActivity, "Пока пусто: слушай музыку и ставь лайки, я наберу данных", Toast.LENGTH_LONG).show()
+            } else openGroup(title, tracks)
+        }
+    }
+
+    private fun showTaste() {
+        lifecycleScope.launch {
+            val text = withContext(Dispatchers.IO) { MusicRecommender.describeTaste(ListenStats.items(this@MusicActivity, allTracks)) }
+            AlertDialog.Builder(this@MusicActivity).setTitle("Мой вкус").setMessage(text)
+                .setPositiveButton("Включить мою волну") { _, _ -> startWave(WaveSpec(WaveSpec.Kind.MY_WAVE)) }
+                .setNeutralButton("Забыть статистику") { _, _ ->
+                    AlertDialog.Builder(this@MusicActivity).setMessage("Стереть, сколько раз песни слушались и пропускались? Лайки останутся.")
+                        .setPositiveButton("Стереть") { _, _ -> ListenStats.clear(this@MusicActivity) }
+                        .setNegativeButton("Отмена", null).show()
+                }
+                .setNegativeButton("Закрыть", null).show()
+        }
     }
 
     private fun groupRows(groups: Map<String?, List<MusicTrack>>, names: Map<String, String>, emoji: Map<String, String>, multiMood: Boolean = false): List<Row> {

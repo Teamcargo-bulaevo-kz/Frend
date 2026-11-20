@@ -73,6 +73,14 @@ class MusicService : Service() {
     private var resumeAtMs = 0
     private var resumeOnFocusGain = false
 
+    // Волна (Моя волна, настроение, похожие): очередь пополняется сама по мере игры
+    private var wave: WaveSpec? = null
+    private var waveSession: MusicRecommender.Session? = null
+    @Volatile private var waveLoading = false
+    // Прослушивание текущей песни уже записано в статистику
+    private var listenRecorded = true
+    private val waveExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     private val focusRequest: AudioFocusRequest by lazy {
         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(
@@ -175,6 +183,12 @@ class MusicService : Service() {
             ACTION_PLAY -> {
                 // startForegroundService обязывает сразу показать уведомление
                 enterForeground()
+                recordListen(finished = false)
+                wave = MusicQueue.wave
+                waveSession = if (wave != null) (MusicQueue.waveSession ?: MusicRecommender.Session()) else null
+                MusicQueue.wave = null
+                MusicQueue.waveSession = null
+                PlayerState.wave = wave
                 queue = MusicQueue.tracks
                 originalQueue = queue
                 shuffleOn = false
@@ -197,6 +211,9 @@ class MusicService : Service() {
 
     override fun onDestroy() {
         PlayLog.add("служба музыки остановлена")
+        recordListen(finished = false)
+        ListenStats.flush(this)
+        waveExecutor.shutdown()
         handler.removeCallbacks(idleStop)
         if (noisyRegistered) { try { unregisterReceiver(noisyReceiver) } catch (_: Exception) {}; noisyRegistered = false }
         releasePlayer()
@@ -226,6 +243,9 @@ class MusicService : Service() {
 
         val track = queue[index]
         PlayLog.add("играет: ${track.artist} - ${track.title} (${index + 1} из ${queue.size})")
+        listenRecorded = false
+        waveSession?.onPlayed(RecItem(track, null, null))
+        if (wave != null && index >= queue.size - 3) extendWave()
         val mp = MediaPlayer()
         try {
             mp.setAudioAttributes(
@@ -248,7 +268,7 @@ class MusicService : Service() {
                 }
             }
             mp.setOnCompletionListener {
-                if (player === it) { PlayLog.add("трек закончился"); errorRetries = 0; next(auto = true) }
+                if (player === it) { PlayLog.add("трек закончился"); errorRetries = 0; recordListen(finished = true); next(auto = true) }
             }
             mp.setOnErrorListener { failed, what, extra ->
                 PlayLog.add("ошибка плеера: код $what/$extra")
@@ -294,10 +314,14 @@ class MusicService : Service() {
             playCurrent()
             return
         }
+        if (!auto) recordListen(finished = false)
         if (auto && index >= queue.lastIndex && repeatMode != PlayerState.REPEAT_ALL) {
+            // Волна не кончается: если пополнение не успело, добираем сразу
+            if (wave != null && appendWaveNow()) { index++; playCurrent(); return }
             stopPlayback("очередь закончилась")
             return
         }
+        if (wave != null && index >= queue.lastIndex && appendWaveNow()) { index++; playCurrent(); return }
         index = if (index >= queue.lastIndex) 0 else index + 1
         playCurrent()
     }
@@ -310,6 +334,7 @@ class MusicService : Service() {
             refreshState()
             return
         }
+        recordListen(finished = false)
         index = if (index <= 0) queue.lastIndex else index - 1
         playCurrent()
     }
@@ -346,6 +371,10 @@ class MusicService : Service() {
 
     private fun stopPlayback(why: String = "команда") {
         PlayLog.add("остановка: $why")
+        recordListen(finished = false)
+        wave = null
+        waveSession = null
+        PlayerState.wave = null
         handler.removeCallbacks(idleStop)
         releasePlayer()
         abandonFocus()
@@ -370,6 +399,86 @@ class MusicService : Service() {
         player = null
     }
 
+    // ---------------------------------------------------------------- статистика и волна
+
+    /** Итог прослушивания текущей песни: дослушал, пропустил или частично. Один раз на включение. */
+    private fun recordListen(finished: Boolean) {
+        if (listenRecorded) return
+        val track = queue.getOrNull(index) ?: return
+        listenRecorded = true
+        val pos = try { if (prepared) player?.currentPosition ?: 0 else 0 } catch (_: Exception) { 0 }
+        val listened = if (finished) track.durationMs.coerceAtLeast(pos.toLong()) else pos.toLong()
+        val app = applicationContext
+        val session = waveSession
+        waveExecutor.execute {
+            try {
+                val result = ListenStats.record(app, track, listened, finished)
+                if (session != null && result != ListenStats.Outcome.PARTIAL) {
+                    val item = RecItem(track, MusicTags.get(app, track), null)
+                    handler.post { session.onFeedback(item, result == ListenStats.Outcome.COMPLETE) }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    /** Пополняет волну в фоне: данные читаются в фоне, выбор делается на главном потоке. */
+    private fun extendWave() {
+        val spec = wave ?: return
+        if (waveLoading) return
+        waveLoading = true
+        val app = applicationContext
+        waveExecutor.execute {
+            val items = try { ListenStats.items(app) } catch (_: Exception) { emptyList() }
+            handler.post {
+                waveLoading = false
+                if (wave !== spec) return@post
+                appendFrom(items)
+            }
+        }
+    }
+
+    /** Добирает волну сразу (очередь кончилась раньше, чем пришло фоновое пополнение). */
+    private fun appendWaveNow(): Boolean {
+        val items = try { ListenStats.items(applicationContext) } catch (_: Exception) { emptyList() }
+        return appendFrom(items)
+    }
+
+    private fun appendFrom(items: List<RecItem>): Boolean {
+        val spec = wave ?: return false
+        val session = waveSession ?: MusicRecommender.Session().also { waveSession = it }
+        // Всё, что уже в очереди, не повторяем
+        queue.forEach { session.played.add(MusicTags.trackKey(it)) }
+        var more = MusicRecommender.nextForWave(spec, items, session, 10)
+        if (more.isEmpty() && session.played.size > 20) {
+            // Подходящие песни кончились: начинаем круг заново, кроме последних 20
+            val keep = session.played.toList().takeLast(20)
+            session.played.clear(); session.played.addAll(keep)
+            more = MusicRecommender.nextForWave(spec, items, session, 10)
+        }
+        if (more.isEmpty()) return false
+        val tracks = more.map { it.track }
+        queue = queue + tracks
+        originalQueue = originalQueue + tracks
+        PlayLog.add("волна: добавлено ${tracks.size}")
+        refreshState()
+        return true
+    }
+
+    /** Не прерывая текущую песню, превращает остаток очереди в волну (например, «Ещё такое» в плеере). */
+    fun continueAsWave(spec: WaveSpec, upcoming: List<MusicTrack>) {
+        val current = queue.getOrNull(index)
+        queue = (if (current != null) queue.take(index + 1) else emptyList()) + upcoming.filter { it.id != current?.id }
+        originalQueue = queue
+        shuffleOn = false
+        wave = spec
+        waveSession = MusicRecommender.Session().also { s -> queue.forEach { s.played.add(MusicTags.trackKey(it)) } }
+        PlayerState.wave = spec
+        refreshState()
+    }
+
+    /** Текущая волна: название для экранов. */
+    fun currentWave(): WaveSpec? = wave
+
     // ---------------------------------------------------------------- управление из экранов музыки
 
     fun seekTo(ms: Int) {
@@ -390,6 +499,7 @@ class MusicService : Service() {
 
     fun playIndex(i: Int) {
         if (i !in queue.indices) return
+        if (i != index) recordListen(finished = false)
         index = i
         errorsInRow = 0
         errorRetries = 0
@@ -482,7 +592,17 @@ class MusicService : Service() {
         val track = queue.getOrNull(index) ?: return
         val now = MusicTags.likedOf(this, track)
         MusicTags.setLiked(this, track, if (now > 0) 0 else 1)
+        if (now <= 0) waveSession?.onFeedback(RecItem(track, MusicTags.get(this, track), null), completed = true)
         refreshState()
+    }
+
+    /** Дизлайк в волне: песня пропускается, похожие больше не предлагаются. */
+    fun dislikeCurrent() {
+        val track = queue.getOrNull(index) ?: return
+        MusicTags.setLiked(this, track, -1)
+        waveSession?.onFeedback(RecItem(track, MusicTags.get(this, track), null), completed = false)
+        listenRecorded = true
+        next(auto = false)
     }
 
     private fun isLiked(): Boolean = queue.getOrNull(index)?.let { MusicTags.likedOf(this, it) > 0 } == true

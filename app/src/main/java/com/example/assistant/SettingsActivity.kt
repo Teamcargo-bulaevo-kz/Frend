@@ -130,6 +130,7 @@ class SettingsActivity : AppCompatActivity() {
             ),
             "Музыка" to listOf(
                 "play_music" to "Воспроизведение музыки",
+                "music_wave" to "Моя волна, похожие и подборки",
                 "music_control" to "Управление плеером",
                 "music_rate" to "Подбор музыки по настроению",
                 "music_tags" to "Теги музыкальных файлов",

@@ -383,6 +383,9 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 )
             }
             "music_control" -> MusicActions.control(context, a.optString("action", ""))
+            "music_wave" -> withContext(Dispatchers.IO) {
+                MusicActions.wave(context, a.optString("kind", "my_wave"), a.optStringOrNull("mood"), a.optStringOrNull("preset"), a.optStringOrNull("query"))
+            }
             "set_volume" -> MusicActions.setVolume(
                 context, a.optString("action", ""), a.optIntOrNull("percent"), a.optStringOrNull("stream")
             )
