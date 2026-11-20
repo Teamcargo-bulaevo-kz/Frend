@@ -102,6 +102,9 @@ object ChatHistory {
 
     /** Дописывает сообщение. chatId нужен, если ответ приходит позже и пользователь мог переключить чат. */
     @Synchronized
+    /** Экран чата подписывается, чтобы сразу показывать реплики голосового диалога. Вызывается с любого потока. */
+    @Volatile var onChanged: (() -> Unit)? = null
+
     fun append(context: Context, role: String, text: String, chatId: String? = null): List<ChatMessage> {
         val id = chatId?.takeIf { file(context, it).exists() } ?: currentId(context)
         val (title, messages) = readChat(context, id) ?: (DEFAULT_TITLE to emptyList<ChatMessage>())

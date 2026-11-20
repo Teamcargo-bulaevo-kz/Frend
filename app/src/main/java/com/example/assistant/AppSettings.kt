@@ -37,6 +37,13 @@ object AppSettings {
     /** Режим шёпота: тихая речь подтягивается автоматически. */
     const val WHISPER = "whisper_mode"
 
+    /** Режим диалога: после ответа можно продолжать без слова активации. */
+    const val DIALOG = "dialog_mode"
+    /** Перебивание: микрофон слушает и пока ассистент говорит, чужие слова останавливают озвучку. */
+    const val BARGE_IN = "barge_in"
+    /** Сколько ждать следующей реплики в диалоге. */
+    val DIALOG_WINDOW_S = IntSpec("dialog_window_s", 8, 4, 20)
+
     val CHAT_TEXT_SP = IntSpec("chat_text_size", 16, 13, 23)
     /** Масштаб текста всего приложения, в процентах. */
     val FONT_SCALE = IntSpec("ui_font_scale", 100, 80, 140)
@@ -100,9 +107,9 @@ object AppSettings {
         val editor = p.edit()
         listOf(
             CUE_START_VOLUME, CUE_END_VOLUME, REQUEST_TIMEOUT_S, CONNECT_TIMEOUT_S, RETRY_WAIT_S,
-            VOICE_DELAY_MS, AFTER_ANSWER_MS, VOICE_SILENCE_MS, CHAT_TEXT_SP, FONT_SCALE, MIC_GAIN
+            VOICE_DELAY_MS, AFTER_ANSWER_MS, VOICE_SILENCE_MS, CHAT_TEXT_SP, FONT_SCALE, MIC_GAIN, DIALOG_WINDOW_S
         ).forEach { editor.remove(it.key) }
-        editor.remove(WHISPER).remove(CUE_START_ON).remove(CUE_END_ON).remove(THEME).remove("command_window_ms")
+        editor.remove(WHISPER).remove(DIALOG).remove(BARGE_IN).remove(CUE_START_ON).remove(CUE_END_ON).remove(THEME).remove("command_window_ms")
         p.all.keys.filter { it.startsWith("feature_") }.forEach { editor.remove(it) }
         editor.apply()
         applyTheme(context)

@@ -230,6 +230,22 @@ class SettingsActivity : AppCompatActivity() {
             AppSettings.setInt(this, AppSettings.MIC_GAIN, it)
         }
 
+        section("Диалог", "Разговор без слова активации и перебивание голосом. Долгое нажатие на микрофон в чате начинает разговор, «давай поговорим» — тоже")
+        addSwitch("Режим диалога", "После ответа можно сразу говорить дальше, без «${WakeWordService.phraseTitle(this)}». Молчание или «хватит» — конец.",
+            AppSettings.bool(this, AppSettings.DIALOG, true)) {
+            getSharedPreferences(AppSettings.PREFS, MODE_PRIVATE).edit().putBoolean(AppSettings.DIALOG, it).apply()
+        }
+        addSwitch("Перебивать голосом", "Микрофон слушает и пока ассистент говорит: скажи «стоп» или новую просьбу — он замолчит и выслушает. Лучше работает в наушниках.",
+            AppSettings.bool(this, AppSettings.BARGE_IN, true)) {
+            getSharedPreferences(AppSettings.PREFS, MODE_PRIVATE).edit().putBoolean(AppSettings.BARGE_IN, it).apply()
+            // Применяем сразу: перезапуск слушания
+            if (WakeWordService.enabled(this)) { stopService(Intent(this, WakeWordService::class.java)); WakeWordService.start(this) }
+        }
+        addSeek("Сколько ждать следующую реплику", AppSettings.int(this, AppSettings.DIALOG_WINDOW_S), " сек",
+            AppSettings.DIALOG_WINDOW_S.min, AppSettings.DIALOG_WINDOW_S.max) {
+            AppSettings.setInt(this, AppSettings.DIALOG_WINDOW_S, it)
+        }
+
         section("Внешний вид", "Изменения сохраняются на устройстве")
         addChoice("Тема приложения", arrayOf("Как в системе", "Светлая", "Тёмная"), prefs.getString("app_theme", "system") ?: "system",
             arrayOf("system", "light", "dark")) { selected ->

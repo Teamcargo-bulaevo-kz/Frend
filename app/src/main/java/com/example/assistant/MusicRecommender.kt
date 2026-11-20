@@ -170,7 +170,7 @@ object MusicRecommender {
         if (fs.isEmpty()) return null
         val acc = DoubleArray(fs[0].size)
         for (f in fs) for (i in f.indices) acc[i] += f[i]
-        for (i in acc.indices) acc[i] /= fs.size
+        for (i in acc.indices) acc[i] = acc[i] / fs.size
         return acc
     }
 

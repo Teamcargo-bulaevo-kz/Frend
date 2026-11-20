@@ -27,6 +27,13 @@ object Speaker {
     private const val TAIL_MS = 400L
     private const val MAX_SPEECH_MS = 60_000L
 
+    /** Что ассистент сейчас произносит: по этому тексту перебивание отличается от эха ([BargeIn]). */
+    @Volatile var currentText: String = ""
+        private set
+
+    /** Ассистент говорит прямо сейчас (без хвоста после конца фразы). */
+    fun isSpeaking(): Boolean = speakingSince != 0L && System.currentTimeMillis() - speakingSince < MAX_SPEECH_MS
+
     fun isBusy(): Boolean {
         val now = System.currentTimeMillis()
         if (speakingSince != 0L && now - speakingSince < MAX_SPEECH_MS) return true
@@ -138,6 +145,7 @@ object Speaker {
     fun speak(context: Context, text: String) {
         val spoken = if (brief(context)) SpeechText.brief(text) else clean(text)
         if (spoken.isEmpty()) return
+        currentText = spoken
         markStart()
         ensure(context) { it.speak(spoken, TextToSpeech.QUEUE_FLUSH, Bundle(), "assistant") }
     }

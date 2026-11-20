@@ -36,6 +36,8 @@ class WakeWordService : Service() {
         const val ACTION_PAUSE = "com.example.assistant.wake.PAUSE"
         const val ACTION_RESUME = "com.example.assistant.wake.RESUME"
         const val ACTION_CANCEL = "com.example.assistant.wake.CANCEL"
+        /** Начать разговор: слушать без слова активации, пока пользователь не замолчит или не скажет «хватит». */
+        const val ACTION_DIALOG = "com.example.assistant.wake.DIALOG"
         private const val CHANNEL_ID = "assistant_wake_word"
         private const val NOTIFICATION_ID = 2002
         private const val PREFS = "assistant_prefs"
@@ -98,6 +100,22 @@ class WakeWordService : Service() {
             startService(context, Intent(context, WakeWordService::class.java))
         }
 
+        /** Разговор из чата или плитки: работает, даже если фоновое слово активации выключено. */
+        fun startDialog(context: Context) {
+            if (!hasMicPermission(context)) return
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PAUSED, false).apply()
+            startService(context, Intent(context, WakeWordService::class.java).setAction(ACTION_DIALOG))
+        }
+
+        /** Идёт ли сейчас разговор (для экрана чата). */
+        @Volatile var dialogActive = false
+            private set
+
+        private val dialogStartPhrases = setOf(
+            "давай поговорим", "поговори со мной", "режим диалога", "включи режим диалога", "начнем диалог", "начнём диалог",
+            "давай пообщаемся", "поболтаем", "давай поболтаем"
+        )
+
         fun test(context: Context) {
             if (!hasMicPermission(context)) return
             startService(context, Intent(context, WakeWordService::class.java).setAction(ACTION_TEST))
@@ -134,6 +152,11 @@ class WakeWordService : Service() {
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
     private val releaseFocusRunnable = Runnable { abandonAssistantAudioFocus() }
+    /** Номер команды: ответ старой команды не должен трогать состояние, если пользователь её перебил. */
+    private var commandGeneration = 0
+    private val dialogTimeout = Runnable { onDialogTimeout() }
+    /** Разговор начат явно («давай поговорим», долгое нажатие на микрофон), а не окно после ответа. */
+    private var explicitDialog = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -169,6 +192,11 @@ class WakeWordService : Service() {
             playCue(listening = false)
         }
         if (intent?.action == ACTION_TEST) diagnosticMode = true
+        if (intent?.action == ACTION_DIALOG) {
+            paused = false
+            stopped = false
+            handler.post { beginDialog(greet = true) }
+        }
         paused = paused || getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_PAUSED, false)
         if (!hasMicPermission(this)) {
             stopSelf()
@@ -194,6 +222,7 @@ class WakeWordService : Service() {
             stopped = false
             acquireCpuWakeLock()
             val localEngine = SherpaWakeWordEngine(applicationContext)
+            localEngine.bargeInEnabled = AppSettings.bool(this, AppSettings.BARGE_IN, true)
             engine = localEngine
             localEngine.start(
                 onText = { text -> handler.post { if (!stopped) handleText(text) } },
@@ -213,6 +242,10 @@ class WakeWordService : Service() {
                         if (diagnosticMode) updateDiagnosticNotification("Распознаю: ${text.take(150)}")
                         // Пользователь договаривает оборванную команду: продлеваем ожидание
                         if (pendingCommand.isNotEmpty() && !processingCommand) armContinuation()
+                        // В диалоге пользователь начал говорить: окно не должно закрыться посреди фразы
+                        if (dialogActive && !processingCommand && awaitingUntil > 0L) {
+                            awaitingUntil = maxOf(awaitingUntil, System.currentTimeMillis() + 4_000L)
+                        }
                         // Give immediate feedback as soon as an interim hypothesis contains the wake word.
                         if (!diagnosticMode && !listeningCuePlayed && WakeWord.commandAfter(text) != null) {
                             listeningCuePlayed = true
@@ -228,6 +261,7 @@ class WakeWordService : Service() {
                         }
                     }
                 },
+                onBargeIn = { heard -> handler.post { if (!stopped && !paused) onBargeIn(heard) } },
                 onError = { message ->
                     handler.post {
                         if (!stopped) {
@@ -396,7 +430,12 @@ class WakeWordService : Service() {
         }
 
         if (System.currentTimeMillis() < awaitingUntil) {
-            ListenLog.add(this, if (pendingCommand.isEmpty()) "команда в окне" else "продолжение команды", text)
+            if (dialogActive && pendingCommand.isEmpty() && BargeIn.isEnd(text)) {
+                ListenLog.add(this, "конец диалога", text)
+                endDialog(sayBye = true)
+                return
+            }
+            ListenLog.add(this, if (pendingCommand.isEmpty()) (if (dialogActive) "реплика в диалоге" else "команда в окне") else "продолжение команды", text)
             awaitingUntil = 0L
             acquireAssistantAudioFocus()
             dispatchCommand(text)
@@ -420,6 +459,16 @@ class WakeWordService : Service() {
             return
         }
         if (pendingParts > 0) ListenLog.add(this, "команда из частей", full)
+        if (TextMatch.normalize(full) in dialogStartPhrases) {
+            clearPending()
+            beginDialog(greet = true)
+            return
+        }
+        if (dialogActive && BargeIn.isEnd(full)) {
+            clearPending()
+            endDialog(sayBye = true)
+            return
+        }
         clearPending()
         awaitingUntil = 0L
         listeningCuePlayed = false
@@ -501,23 +550,109 @@ class WakeWordService : Service() {
 
     private fun runCommand(command: String) {
         processingCommand = true
+        handler.removeCallbacks(dialogTimeout)
+        val generation = ++commandGeneration
         AssistantRunner.process(this, command) { answer ->
+            if (generation != commandGeneration) return@process
             AssistantService.showResult(applicationContext, command, answer)
+            // В режиме диалога после ответа слушаем сразу (ассистента можно перебить), без длинной паузы
+            val dialog = dialogActive || AppSettings.bool(this, AppSettings.DIALOG, true)
+            val pause = if (dialog) 250L else AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong()
             handler.postDelayed({
                 // Ждём, пока ассистент договорит, и только потом снова слушаем
                 runWhenQuiet {
+                    if (generation != commandGeneration) return@runWhenQuiet
                     processingCommand = false
-                    // Ассистент задал вопрос «да или нет» — слушаем ответ без слова активации
-                    if (AssistantRepository.hasPendingConfirmation()) openConfirmWindow()
+                    when {
+                        // Ассистент задал вопрос «да или нет» — слушаем ответ без слова активации
+                        AssistantRepository.hasPendingConfirmation() -> openConfirmWindow()
+                        dialog -> openDialogWindow()
+                    }
                     handler.removeCallbacks(releaseFocusRunnable)
                     handler.postDelayed(releaseFocusRunnable, 15_000L)
                 }
-            }, AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong())
+            }, pause)
         }
+    }
+
+    // ---------------------------------------------------------------- диалог и перебивание
+
+    /** Начало разговора: дальше реплики без слова активации, пока пользователь не замолчит или не скажет «хватит». */
+    private fun beginDialog(greet: Boolean) {
+        dialogActive = true
+        explicitDialog = true
+        ListenLog.add(this, "начало диалога", "")
+        acquireAssistantAudioFocus()
+        if (greet) {
+            Speaker.speak(this, "Давай. Говори, я слушаю. Можешь перебивать.")
+            runWhenQuiet { if (dialogActive) openDialogWindow() }
+        } else openDialogWindow()
+    }
+
+    /** Окно для следующей реплики. Если пользователь молчит — разговор заканчивается тихим сигналом. */
+    private fun openDialogWindow() {
+        if (stopped || paused) return
+        acquireAssistantAudioFocus()
+        dialogActive = true
+        val window = AppSettings.int(this, AppSettings.DIALOG_WINDOW_S) * 1000L
+        awaitingUntil = System.currentTimeMillis() + window
+        listeningCuePlayed = true
+        playCue(listening = true)
+        handler.removeCallbacks(dialogTimeout)
+        handler.postDelayed(dialogTimeout, window)
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(
+            NOTIFICATION_ID, buildWakeNotification("Диалог: слушаю", "Говори без слова «${phraseTitle(this)}», можно перебивать. «Хватит» — закончить.")
+        )
+    }
+
+    private fun onDialogTimeout() {
+        if (stopped || processingCommand || pendingCommand.isNotEmpty()) return
+        // Пользователь ещё говорит (распознавание идёт) — onPartial продлит окно; здесь окно истекло
+        if (System.currentTimeMillis() < awaitingUntil) {
+            handler.postDelayed(dialogTimeout, awaitingUntil - System.currentTimeMillis())
+            return
+        }
+        endDialog(sayBye = false)
+    }
+
+    private fun endDialog(sayBye: Boolean) {
+        handler.removeCallbacks(dialogTimeout)
+        val wasActive = dialogActive
+        val wasExplicit = explicitDialog
+        dialogActive = false
+        explicitDialog = false
+        if (!stopped) (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(
+            NOTIFICATION_ID, buildWakeNotification("Слушаю «${phraseTitle(this)}»", "Ожидаю ключевое слово.")
+        )
+        awaitingUntil = 0L
+        listeningCuePlayed = false
+        if (wasActive) ListenLog.add(this, "диалог закончен", "")
+        if (sayBye) Speaker.speak(this, "Хорошо, если что — зови.")
+        else if (wasExplicit) playCue(listening = false)
+        handler.removeCallbacks(releaseFocusRunnable)
+        handler.postDelayed(releaseFocusRunnable, 2_000L)
+        // Слово активации выключено: служба работала только ради разговора
+        if (!enabled(this)) runWhenQuiet { if (!dialogActive) stopSelf() }
+    }
+
+    /** Пользователь заговорил поверх ответа: замолкаем и слушаем его. */
+    private fun onBargeIn(heard: String) {
+        ListenLog.add(this, "перебил", heard)
+        Speaker.stop()
+        commandGeneration++ // ответ, который перебили, больше ничего не открывает
+        processingCommand = false
+        clearPending()
+        handler.removeCallbacks(dialogTimeout)
+        acquireAssistantAudioFocus()
+        dialogActive = dialogActive || AppSettings.bool(this, AppSettings.DIALOG, true)
+        awaitingUntil = System.currentTimeMillis() + 12_000L
+        listeningCuePlayed = true
+        if (dialogActive) handler.postDelayed(dialogTimeout, 12_000L)
     }
 
     override fun onDestroy() {
         stopped = true
+        dialogActive = false
         handler.removeCallbacksAndMessages(null)
         AssistantRunner.cancel()
         Speaker.stop()

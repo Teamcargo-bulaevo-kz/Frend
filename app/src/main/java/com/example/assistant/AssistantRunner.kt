@@ -28,6 +28,7 @@ object AssistantRunner {
         val app = context.applicationContext
         val chatId = ChatHistory.currentId(app)
         ChatHistory.append(app, "user", text, chatId)
+        ChatHistory.onChanged?.invoke()
         activeJob = scope.launch {
             try {
                 val answer = try {
@@ -38,6 +39,7 @@ object AssistantRunner {
                     FriendlyError.text(e)
                 }
                 ChatHistory.append(app, "assistant", answer, chatId)
+                ChatHistory.onChanged?.invoke()
                 // Голосовая команда вне экрана чата: отвечаем голосом
                 Speaker.speak(app, answer)
                 onDone(answer)

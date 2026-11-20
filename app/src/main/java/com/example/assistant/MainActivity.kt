@@ -235,6 +235,17 @@ class MainActivity : AppCompatActivity() {
             sendPrompt(prompt)
         }
 
+        // Долгое нажатие: разговор голосом без кнопок, ассистента можно перебивать
+        micButton.setOnLongClickListener {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                Speaker.stop()
+                WakeWordService.startDialog(this)
+                Toast.makeText(this, "Разговор: говори, можно перебивать. «Хватит» — закончить", Toast.LENGTH_LONG).show()
+            } else {
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            true
+        }
         micButton.setOnClickListener {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 launchVoiceRecognition()
@@ -255,10 +266,17 @@ class MainActivity : AppCompatActivity() {
             if (prefs.getBoolean("suggestions_enabled", true)) View.VISIBLE else View.GONE
     }
 
+    override fun onStop() {
+        ChatHistory.onChanged = null
+        super.onStop()
+    }
+
     override fun onStart() {
         super.onStart()
         // Чат читаем заново: за время, пока приложение было свёрнуто, могли прийти голосовые команды из шторки
         showCurrentChat()
+        // Реплики голосового диалога появляются в чате сразу
+        ChatHistory.onChanged = { runOnUiThread { if (!isFinishing) showCurrentChat() } }
         WakeWordService.start(this)
         uiScope.launch(Dispatchers.IO) {
             // Музыка, которую система ещё не знает (скачанное, из мессенджеров), добавляется в медиатеку

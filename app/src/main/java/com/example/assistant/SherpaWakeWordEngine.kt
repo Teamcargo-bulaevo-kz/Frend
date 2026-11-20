@@ -34,7 +34,10 @@ class SherpaWakeWordEngine(context: Context) {
     @Volatile private var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
     private val modelDir = File(appContext.filesDir, MODEL_DIR)
 
-    fun start(onText: (String) -> Unit, onError: (String) -> Unit, onStatus: (String) -> Unit = {}, onPartial: (String) -> Unit = {}, onAudioLevel: (Int) -> Unit = {}) {
+    /** Слушать поверх речи ассистента, чтобы его можно было перебить голосом (режим диалога). */
+    @Volatile var bargeInEnabled = false
+
+    fun start(onText: (String) -> Unit, onError: (String) -> Unit, onStatus: (String) -> Unit = {}, onPartial: (String) -> Unit = {}, onAudioLevel: (Int) -> Unit = {}, onBargeIn: (String) -> Unit = {}) {
         if (!running.compareAndSet(false, true)) return
         Thread({
             try {
@@ -149,6 +152,8 @@ class SherpaWakeWordEngine(context: Context) {
                 var wakeWordPartialSent = false
                 var lastPartial = ""
                 var mutedBySpeech = false
+                var bargeActive = false
+                var bargeSpoken = ""
                 val gain = MicGain(
                     AppSettings.int(appContext, AppSettings.MIC_GAIN).toFloat(),
                     AppSettings.bool(appContext, AppSettings.WHISPER, true)
@@ -167,9 +172,30 @@ class SherpaWakeWordEngine(context: Context) {
                         onAudioLevel(level)
                         framesSinceLevel = 0
                     }
-                    // Пока говорит сам ассистент, его голос не должен попасть в распознавание
-                    if (Speaker.isBusy()) {
-                        mutedBySpeech = true
+                    // Пока говорит сам ассистент, его голос не должен попасть в распознавание.
+                    // В режиме перебивания слушаем и во время речи, но реагируем только на чужие слова (см. BargeIn).
+                    if (Speaker.isBusy() && !bargeActive) {
+                        if (bargeInEnabled && Speaker.isSpeaking()) {
+                            val echo = AudioResampler.toModel(pcm, n, captureRate)
+                            gain.process(echo)
+                            if (echo.isNotEmpty()) s.acceptWaveform(echo, SAMPLE_RATE)
+                            while (r.isReady(s)) r.decode(s)
+                            val heard = r.getResult(s).text.trim()
+                            if (heard.isNotBlank() && BargeIn.isUserSpeech(heard, Speaker.currentText, WakeWord.target)) {
+                                bargeActive = true
+                                bargeSpoken = Speaker.currentText
+                                mutedBySpeech = false
+                                lastPartial = heard
+                                wakeWordPartialSent = true // слово активации в перебивании не запускает новую команду отдельно
+                                onBargeIn(heard)
+                            } else if (r.isEndpoint(s)) {
+                                r.reset(s) // это было эхо ассистента
+                            }
+                        }
+                        if (!bargeActive) {
+                            mutedBySpeech = true
+                            continue
+                        }
                         continue
                     }
                     if (mutedBySpeech) {
@@ -192,6 +218,16 @@ class SherpaWakeWordEngine(context: Context) {
                     if (!wakeWordPartialSent && WakeWord.commandAfter(partial) == "" && partial.isNotBlank()) {
                         wakeWordPartialSent = true
                         onText(partial)
+                    }
+                    if (r.isEndpoint(s) && bargeActive) {
+                        // Конец фразы, которой пользователь перебил ассистента: убираем эхо и стоп-слова в начале
+                        val text = BargeIn.stripEcho(r.getResult(s).text.trim(), bargeSpoken, WakeWord.target)
+                        bargeActive = false
+                        wakeWordPartialSent = false
+                        lastPartial = ""
+                        r.reset(s)
+                        if (text.isNotBlank()) onText(text)
+                        continue
                     }
                     if (r.isEndpoint(s)) {
                         val text = r.getResult(s).text.trim()
