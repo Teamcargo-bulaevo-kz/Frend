@@ -4,7 +4,7 @@ package com.example.assistant
  * Перебивание ассистента голосом. Пока ассистент говорит, микрофон продолжает слушать, но распознаватель
  * слышит и самого ассистента (эхо из динамика). Отличаем так: эхо состоит из слов, которые ассистент
  * сейчас произносит, а пользователь говорит другое. Стоп-слова («стоп», «подожди», «хватит») и слово
- * активации прерывают сразу. Чистые функции без Android: покрыты тестами.
+ * активации прерывают сразу. Без наушников (громкий динамик) — только они, чтобы эхо не обрывало ответ. Чистые функции без Android: покрыты тестами.
  */
 object BargeIn {
 
@@ -35,13 +35,15 @@ object BargeIn {
      * Похоже ли распознанное во время озвучки на речь пользователя, а не на эхо ассистента.
      * [partial] — что услышал распознаватель, [spoken] — что сейчас говорит ассистент, [wakeWord] — слово активации.
      */
-    fun isUserSpeech(partial: String, spoken: String, wakeWord: String = ""): Boolean {
+    fun isUserSpeech(partial: String, spoken: String, wakeWord: String = "", onlyStopWords: Boolean = false): Boolean {
         val heard = words(partial)
         if (heard.isEmpty()) return false
         val said = words(spoken).toSet()
         // Слово активации и стоп-слова, если их нет в речи ассистента
         if (wakeWord.isNotBlank() && heard.any { TextMatch.similarity(it, wakeWord) >= 0.75 } && said.none { TextMatch.similarity(it, wakeWord) >= 0.75 }) return true
         if (heard.any { it in stopWords && it !in said }) return true
+        // На громком динамике эхо сильное: перебиваем только стоп-словом или словом активации
+        if (onlyStopWords) return false
         // Обычная речь: хотя бы три слова, и большинство не из того, что говорит ассистент
         if (heard.size < 3) return false
         val foreign = heard.count { !inSpoken(it, said) }

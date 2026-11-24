@@ -10,6 +10,15 @@ object ImageUtil {
 
     private const val MAX_SIDE = 1600
 
+    /** Снимок экрана → JPEG base64, длинная сторона не больше maxSide. */
+    fun bitmapJpegBase64(bitmap: Bitmap, maxSide: Int = 1280): String {
+        val scale = maxSide.toFloat() / maxOf(bitmap.width, bitmap.height)
+        val scaled = if (scale < 1f) Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true) else bitmap
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    }
+
     /** Уменьшает картинку до разумного размера и отдаёт JPEG в base64 для модели. null — не удалось открыть. */
     fun jpegBase64(file: File): String? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

@@ -28,6 +28,10 @@ object SystemState {
                 else Settings.Secure.getInt(app.contentResolver, Settings.Secure.LOCATION_MODE, 0) != 0
             }
             "battery_saver" -> (app.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isPowerSaveMode
+            "nfc" -> android.nfc.NfcAdapter.getDefaultAdapter(app)?.isEnabled
+            "dnd" -> (app.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager)?.let {
+                it.currentInterruptionFilter != android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+            }
             else -> null
         }
     } catch (e: Exception) {

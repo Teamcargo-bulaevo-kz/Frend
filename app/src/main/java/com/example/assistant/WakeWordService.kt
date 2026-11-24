@@ -45,6 +45,10 @@ class WakeWordService : Service() {
         private const val KEY_PAUSED = "wake_word_paused"
         private const val KEY_PHRASE = "wake_phrase"
         private const val DEFAULT_COMMAND_WINDOW_MS = 10_000L
+        private const val WINDOW_WAKE = 0
+        private const val WINDOW_CONFIRM = 1
+        private const val WINDOW_DIALOG = 2
+        private const val WINDOW_BARGE = 3
 
         private fun commandWindowMs(context: Context): Long =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -157,6 +161,8 @@ class WakeWordService : Service() {
     private val dialogTimeout = Runnable { onDialogTimeout() }
     /** Разговор начат явно («давай поговорим», долгое нажатие на микрофон), а не окно после ответа. */
     private var explicitDialog = false
+    /** Какое окно слушания открыто: после слова активации, вопрос «да/нет», реплика диалога, перебивание. */
+    private var windowKind = WINDOW_WAKE
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -405,13 +411,14 @@ class WakeWordService : Service() {
             acquireAssistantAudioFocus()
             // Новое слово активации начинает команду заново
             clearPending()
-            if (command.isNotBlank()) {
+            if (ListenFilter.meaningful(command)) {
                 // If interim recognition did not catch the keyword, still confirm before acting.
                 if (!listeningCuePlayed) playCue(listening = true)
                 dispatchCommand(command)
             } else {
                 acquireAssistantAudioFocus()
                 awaitingUntil = System.currentTimeMillis() + commandWindowMs(this)
+                windowKind = WINDOW_WAKE
                 if (!listeningCuePlayed) playCue(listening = true)
                 listeningCuePlayed = true
                 // В режиме шёпота голосовое «Слушаю» не произносим: пока ассистент говорит, микрофон закрыт,
@@ -433,6 +440,12 @@ class WakeWordService : Service() {
             if (dialogActive && pendingCommand.isEmpty() && BargeIn.isEnd(text)) {
                 ListenLog.add(this, "конец диалога", text)
                 endDialog(sayBye = true)
+                return
+            }
+            // Окно после ответа слушает без слова активации: чужой разговор и шум отбрасываем, окно остаётся открытым
+            if (windowKind == WINDOW_DIALOG && pendingCommand.isEmpty() &&
+                !ListenFilter.followUp(text, LocalCommands.parse(text) != null)) {
+                ListenLog.add(this, "не похоже на обращение, пропускаю", text)
                 return
             }
             ListenLog.add(this, if (pendingCommand.isEmpty()) (if (dialogActive) "реплика в диалоге" else "команда в окне") else "продолжение команды", text)
@@ -537,6 +550,7 @@ class WakeWordService : Service() {
     private fun openConfirmWindow() {
         acquireAssistantAudioFocus()
         awaitingUntil = System.currentTimeMillis() + commandWindowMs(this)
+        windowKind = WINDOW_CONFIRM
         playCue(listening = true)
         listeningCuePlayed = true
         val expectedEnd = awaitingUntil
@@ -596,6 +610,7 @@ class WakeWordService : Service() {
         dialogActive = true
         val window = AppSettings.int(this, AppSettings.DIALOG_WINDOW_S) * 1000L
         awaitingUntil = System.currentTimeMillis() + window
+        windowKind = if (explicitDialog) WINDOW_BARGE else WINDOW_DIALOG
         listeningCuePlayed = true
         playCue(listening = true)
         handler.removeCallbacks(dialogTimeout)
@@ -646,6 +661,7 @@ class WakeWordService : Service() {
         acquireAssistantAudioFocus()
         dialogActive = dialogActive || AppSettings.bool(this, AppSettings.DIALOG, true)
         awaitingUntil = System.currentTimeMillis() + 12_000L
+        windowKind = WINDOW_BARGE
         listeningCuePlayed = true
         if (dialogActive) handler.postDelayed(dialogTimeout, 12_000L)
     }

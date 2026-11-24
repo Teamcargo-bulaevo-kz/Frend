@@ -25,6 +25,8 @@ class AssistantAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // Кнопка «Живого экрана», если пользователь её включал
+        handler.postDelayed({ ScreenOverlay.restoreBubble(this) }, 800)
     }
 
     /** Сворачивает ассистента на рабочий стол и через секунду делает скриншот. */
@@ -194,11 +196,192 @@ class AssistantAccessibilityService : AccessibilityService() {
         return null
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    // ---------------------------------------------------------------- управление экраном голосом
+
+    /** Системные кнопки: назад, домой, недавние, уведомления, шторка, блокировка, меню питания, скриншот. */
+    fun globalAction(name: String): Boolean {
+        val action = when (name) {
+            "back" -> GLOBAL_ACTION_BACK
+            "home" -> GLOBAL_ACTION_HOME
+            "recents" -> GLOBAL_ACTION_RECENTS
+            "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
+            "quick_settings" -> GLOBAL_ACTION_QUICK_SETTINGS
+            "power" -> GLOBAL_ACTION_POWER_DIALOG
+            "lock" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_LOCK_SCREEN else return false
+            "screenshot" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_TAKE_SCREENSHOT else return false
+            "split" -> if (android.os.Build.VERSION.SDK_INT >= 24) GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN else return false
+            else -> return false
+        }
+        return performGlobalAction(action)
+    }
+
+    /** Нажимает элемент экрана по подписи («нажми Отправить»). Если элемент не нажимается, касается его центра. */
+    fun clickText(query: String): String {
+        val q = TextMatch.normalize(query)
+        if (q.isEmpty()) return "Скажи, что нажать."
+        var best: AccessibilityNodeInfo? = null
+        var bestScore = Int.MAX_VALUE
+        for (root in roots()) {
+            val stack = ArrayDeque<AccessibilityNodeInfo>()
+            stack.add(root)
+            var visited = 0
+            while (stack.isNotEmpty() && visited < 1500) {
+                val node = stack.removeLast()
+                visited++
+                if (node.isVisibleToUser && !node.isPassword) {
+                    val text = TextMatch.normalize(nodeText(node))
+                    if (text.isNotEmpty()) {
+                        val score = when {
+                            text == q -> 0
+                            text.startsWith(q) -> 10 + text.length - q.length
+                            text.contains(q) -> 30 + text.length - q.length
+                            TextMatch.similarity(text, q) >= 0.75 -> 60
+                            else -> -1
+                        }
+                        if (score >= 0 && score + (if (node.isClickable) 0 else 5) < bestScore) { best = node; bestScore = score + if (node.isClickable) 0 else 5 }
+                    }
+                }
+                for (i in 0 until node.childCount) node.getChild(i)?.let { stack.add(it) }
+            }
+        }
+        val node = best ?: return "Не нашёл на экране «$query»."
+        if (clickNode(node)) return "Нажал «${nodeText(node).take(40)}»"
+        val r = android.graphics.Rect()
+        node.getBoundsInScreen(r)
+        return if (tap(r.exactCenterX(), r.exactCenterY())) "Нажал «${nodeText(node).take(40)}»" else "Не получилось нажать «$query»."
+    }
+
+    /** Касание экрана в точке (нужна возможность жестов в службе). */
+    fun tap(x: Float, y: Float): Boolean {
+        if (x < 0 || y < 0) return false
+        val path = android.graphics.Path().apply { moveTo(x, y) }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60)).build()
+        return dispatchGesture(gesture, null, null)
+    }
+
+    /** Листает экран: up/down/left/right. Сначала прокручиваемым списком, потом жестом. */
+    fun scroll(direction: String): String {
+        val forward = direction == "down" || direction == "right"
+        var target: AccessibilityNodeInfo? = null
+        var area = 0
+        rootInActiveWindow?.let { root ->
+            val stack = ArrayDeque<AccessibilityNodeInfo>()
+            stack.add(root)
+            var visited = 0
+            while (stack.isNotEmpty() && visited < 1500) {
+                val n = stack.removeLast()
+                visited++
+                if (n.isScrollable && n.isVisibleToUser) {
+                    val r = android.graphics.Rect(); n.getBoundsInScreen(r)
+                    val a = r.width() * r.height()
+                    if (a > area) { area = a; target = n }
+                }
+                for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
+            }
+        }
+        val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        if (target?.performAction(action) == true) return if (forward) "Пролистал дальше" else "Пролистал назад"
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels.toFloat(); val h = dm.heightPixels.toFloat()
+        val path = android.graphics.Path()
+        when (direction) {
+            "up" -> { path.moveTo(w / 2, h * 0.3f); path.lineTo(w / 2, h * 0.75f) }
+            "left" -> { path.moveTo(w * 0.2f, h / 2); path.lineTo(w * 0.8f, h / 2) }
+            "right" -> { path.moveTo(w * 0.8f, h / 2); path.lineTo(w * 0.2f, h / 2) }
+            else -> { path.moveTo(w / 2, h * 0.75f); path.lineTo(w / 2, h * 0.3f) }
+        }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 300)).build()
+        return if (dispatchGesture(gesture, null, null)) "Пролистал" else "Не получилось пролистать"
+    }
+
+    /** Вводит текст в поле, где стоит курсор (или в первое поле ввода на экране). */
+    fun typeText(text: String): String {
+        val root = rootInActiveWindow ?: return "Не вижу окно."
+        val field = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable } ?: run {
+            var found: AccessibilityNodeInfo? = null
+            val stack = ArrayDeque<AccessibilityNodeInfo>(); stack.add(root)
+            while (stack.isNotEmpty() && found == null) {
+                val n = stack.removeLast()
+                if (n.isEditable && n.isVisibleToUser) found = n
+                for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
+            }
+            found
+        } ?: return "На экране нет поля ввода."
+        if (field.isPassword) return "В поле пароля текст не ввожу."
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        return if (field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) "Ввёл текст" else "Поле не приняло текст."
+    }
+
+    /** Видимые подписи с координатами — для переводчика поверх экрана. Пароли и пустое пропускаются. */
+    fun textNodes(maxNodes: Int = 120): List<Pair<String, android.graphics.Rect>> {
+        val root = rootInActiveWindow ?: return emptyList()
+        if (root.packageName == packageName) return emptyList()
+        val result = ArrayList<Pair<String, android.graphics.Rect>>()
+        val stack = ArrayDeque<AccessibilityNodeInfo>(); stack.add(root)
+        var visited = 0
+        while (stack.isNotEmpty() && visited < 2000 && result.size < maxNodes) {
+            val n = stack.removeLast()
+            visited++
+            if (!n.isVisibleToUser) continue
+            val t = n.text?.toString()?.trim().orEmpty()
+            if (t.isNotEmpty() && !n.isPassword && t.any { it.isLetter() }) {
+                val r = android.graphics.Rect(); n.getBoundsInScreen(r)
+                if (r.width() > 8 && r.height() > 8) result.add(t.take(500) to r)
+            }
+            for (i in n.childCount - 1 downTo 0) n.getChild(i)?.let { stack.add(it) }
+        }
+        return result
+    }
+
+    /** Пакет открытого приложения (для «Живого экрана» и переводчика). */
+    fun currentPackage(): String = rootInActiveWindow?.packageName?.toString().orEmpty()
+
+    /** Снимок экрана в JPEG base64 (Android 11+). null — нельзя: старый Android или служба включена до обновления. */
+    suspend fun screenshotJpeg(maxSide: Int = 1280): String? {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null
+        // Наши подсказки поверх экрана не должны попасть на снимок
+        val hidden = ScreenOverlay.hideTemporarily()
+        if (hidden) delay(120)
+        try {
+            return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                try {
+                    takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : android.accessibilityservice.AccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(result: android.accessibilityservice.AccessibilityService.ScreenshotResult) {
+                            val encoded = try {
+                                val hw = android.graphics.Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                                val bmp = hw?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                                result.hardwareBuffer.close()
+                                bmp?.let { ImageUtil.bitmapJpegBase64(it, maxSide) }
+                            } catch (e: Exception) { null }
+                            if (cont.isActive) cont.resumeWith(Result.success(encoded))
+                        }
+                        override fun onFailure(errorCode: Int) {
+                            if (cont.isActive) cont.resumeWith(Result.success(null))
+                        }
+                    })
+                } catch (e: Exception) {
+                    if (cont.isActive) cont.resumeWith(Result.success(null))
+                }
+            }
+        } finally {
+            if (hidden) ScreenOverlay.restore()
+        }
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Перевод поверх экрана убираем, когда пользователь ушёл на другое окно
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) ScreenOverlay.onWindowChanged(event.packageName?.toString().orEmpty())
+    }
 
     override fun onInterrupt() = Unit
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        ScreenOverlay.removeAll()
         instance = null
         handler.removeCallbacksAndMessages(null)
         return super.onUnbind(intent)

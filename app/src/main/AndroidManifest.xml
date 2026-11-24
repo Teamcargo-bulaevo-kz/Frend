@@ -35,6 +35,10 @@
 
     <!-- Яркость и автоповорот: выдаётся вручную («Изменение системных настроек») -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <!-- Выдаётся только через Shizuku/adb: приложение само включает свою службу специальных возможностей и геолокацию -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <!-- Чтобы «переводчик на экране» и кнопка «Спросить про экран» показывались поверх других приложений -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -195,6 +199,17 @@
             android:foregroundServiceType="mediaPlayback" />
 
         <!-- Нужна только для скриншотов. Включается вручную в специальных возможностях -->
+        <!-- Чтение уведомлений по просьбе («что пришло»): только в памяти, на диск не пишется -->
+        <service
+            android:name=".NotificationReader"
+            android:exported="true"
+            android:label="Assistant"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".AssistantAccessibilityService"
             android:exported="false"

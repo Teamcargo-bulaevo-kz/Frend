@@ -34,6 +34,16 @@ class SherpaWakeWordEngine(context: Context) {
     @Volatile private var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
     private val modelDir = File(appContext.filesDir, MODEL_DIR)
 
+    /** Наушники (проводные или Bluetooth): эха из динамика почти нет, перебивать можно любой фразой. */
+    private fun headsetConnected(): Boolean = try {
+        val am = appContext.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+        am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET || it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET
+        }
+    } catch (_: Exception) { false }
+
     /** Слушать поверх речи ассистента, чтобы его можно было перебить голосом (режим диалога). */
     @Volatile var bargeInEnabled = false
 
@@ -154,6 +164,8 @@ class SherpaWakeWordEngine(context: Context) {
                 var mutedBySpeech = false
                 var bargeActive = false
                 var bargeSpoken = ""
+                var echoListening = false
+                var speakerOnly = true
                 val gain = MicGain(
                     AppSettings.int(appContext, AppSettings.MIC_GAIN).toFloat(),
                     AppSettings.bool(appContext, AppSettings.WHISPER, true)
@@ -176,12 +188,13 @@ class SherpaWakeWordEngine(context: Context) {
                     // В режиме перебивания слушаем и во время речи, но реагируем только на чужие слова (см. BargeIn).
                     if (Speaker.isBusy() && !bargeActive) {
                         if (bargeInEnabled && Speaker.isSpeaking()) {
+                            if (!echoListening) { echoListening = true; speakerOnly = !headsetConnected() }
                             val echo = AudioResampler.toModel(pcm, n, captureRate)
                             gain.process(echo)
                             if (echo.isNotEmpty()) s.acceptWaveform(echo, SAMPLE_RATE)
                             while (r.isReady(s)) r.decode(s)
                             val heard = r.getResult(s).text.trim()
-                            if (heard.isNotBlank() && BargeIn.isUserSpeech(heard, Speaker.currentText, WakeWord.target)) {
+                            if (heard.isNotBlank() && BargeIn.isUserSpeech(heard, Speaker.currentText, WakeWord.target, onlyStopWords = speakerOnly)) {
                                 bargeActive = true
                                 bargeSpoken = Speaker.currentText
                                 mutedBySpeech = false
@@ -194,12 +207,14 @@ class SherpaWakeWordEngine(context: Context) {
                         }
                         if (!bargeActive) {
                             mutedBySpeech = true
+                            if (!Speaker.isSpeaking()) echoListening = false
                             continue
                         }
                         continue
                     }
                     if (mutedBySpeech) {
                         mutedBySpeech = false
+                        echoListening = false
                         r.reset(s)
                         lastPartial = ""
                         wakeWordPartialSent = false
@@ -223,6 +238,7 @@ class SherpaWakeWordEngine(context: Context) {
                         // Конец фразы, которой пользователь перебил ассистента: убираем эхо и стоп-слова в начале
                         val text = BargeIn.stripEcho(r.getResult(s).text.trim(), bargeSpoken, WakeWord.target)
                         bargeActive = false
+                        echoListening = false
                         wakeWordPartialSent = false
                         lastPartial = ""
                         r.reset(s)

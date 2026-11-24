@@ -336,4 +336,27 @@ class LocalCommandsTest {
         // обычный таймер не сломан
         assertCmd("таймер на 10 минут", "set_timer", "seconds" to 600)
     }
+
+    @Test fun screenFilesNotifications() {
+        assertCmd("заблокируй экран", "screen_control", "action" to "lock")
+        assertCmd("на главный экран", "screen_control", "action" to "home")
+        assertCmd("пролистай вниз", "screen_control", "action" to "scroll", "direction" to "down")
+        assertCmd("нажми на кнопку отправить", "screen_control", "action" to "click", "text" to "отправить")
+        assertCmd("введи Привет, как дела?", "screen_control", "action" to "type", "text" to "Привет, как дела?")
+        assertCmd("что на экране", "read_screen")
+        assertCmd("переведи экран на английский", "screen_translate", "language" to "английский")
+        assertCmd("включи живой экран", "live_screen", "on" to true)
+        assertCmd("разложи загрузки по датам", "files", "action" to "organize", "folder" to "загрузки", "by" to "date")
+        assertCmd("отсортируй файлы в документах", "files", "action" to "organize", "folder" to "документах", "by" to "type")
+        assertCmd("верни файлы как было", "files", "action" to "undo")
+        assertCmd("найди дубликаты", "files", "action" to "duplicates")
+        assertCmd("прочитай уведомления", "notifications")
+        assertCmd("что написали в телеграме", "notifications", "app" to "телеграме")
+        assertCmd("закрой приложение ютуб", "close_app", "name" to "ютуб")
+        assertCmd("выдай все разрешения", "grant_permissions")
+        assertCmd("какой износ батареи", "device_info", "section" to "battery_health")
+        assertCmd("полный отчёт о телефоне", "device_info", "section" to "full")
+        // «назад» по-прежнему — предыдущий трек
+        assertCmd("назад", "music_control", "action" to "previous")
+    }
 }

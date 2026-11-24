@@ -149,6 +149,13 @@ class SettingsActivity : AppCompatActivity() {
             "Система и интернет" to listOf(
                 "device_info" to "Состояние телефона",
                 "read_screen" to "Чтение экрана",
+                "screen_control" to "Управление экраном (назад, нажать, листать, ввести)",
+                "screen_translate" to "Переводчик на экране",
+                "live_screen" to "Живой экран",
+                "files" to "Порядок в файлах (без удаления)",
+                "notifications" to "Чтение уведомлений",
+                "close_app" to "Закрытие приложений (Shizuku)",
+                "grant_permissions" to "Выдача разрешений через Shizuku",
                 "set_brightness" to "Яркость экрана",
                 "quick_setting" to "Быстрые настройки телефона",
                 "web_search" to "Поиск информации в интернете"
@@ -246,6 +253,18 @@ class SettingsActivity : AppCompatActivity() {
             AppSettings.setInt(this, AppSettings.DIALOG_WINDOW_S, it)
         }
 
+        section("Экран", "Живой экран, переводчик и управление голосом. Нужна служба специальных возможностей «Assistant» (её можно включить через Shizuku)")
+        addSwitch("Живой экран", "Вопросы о том, что видно («что тут?», «помоги ответить»), идут модели вместе со снимком экрана. У края экрана кнопки «?» и «Aあ».",
+            ScreenAssist.live(this)) {
+            Toast.makeText(this, ScreenAssist.setLive(this, it), Toast.LENGTH_LONG).show()
+        }
+        addSwitch("Чтение экрана по просьбе", "Разрешить смотреть на экран и нажимать по названию, когда просишь сам. Пароли не читаются.", Privacy.screenAllowed(this)) {
+            Privacy.setScreenAllowed(this, it)
+        }
+        addAction("Перевести экран", "Сверни настройки и скажи «переведи экран» или нажми «Aあ» у края экрана. Можно «переведи экран на английский».") {
+            Toast.makeText(this, if (AssistantAccessibilityService.instance == null) "Сначала включи службу специальных возможностей «Assistant»" else "Открой нужное приложение и нажми «Aあ»", Toast.LENGTH_LONG).show()
+        }
+
         section("Внешний вид", "Изменения сохраняются на устройстве")
         addChoice("Тема приложения", arrayOf("Как в системе", "Светлая", "Тёмная"), prefs.getString("app_theme", "system") ?: "system",
             arrayOf("system", "light", "dark")) { selected ->
@@ -290,8 +309,11 @@ class SettingsActivity : AppCompatActivity() {
             if (WakeWordService.hasMicPermission(this)) WakeWordService.test(this)
             else micPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
-        addAction("Консоль (Shizuku)", "Память и процессы по приложениям. Только чтение. Статус: ${ShizukuShell.state(this).text}") {
+        addAction("Консоль (Shizuku)", "Процессы, выдача разрешений, переключатели без шторки. Статус: ${ShizukuShell.state(this).text}") {
             showShizuku()
+        }
+        addAction("Выдать все разрешения через Shizuku", "Файлы, микрофон, контакты, уведомления, специальные возможности, без ограничений батареи — одной кнопкой") {
+            grantAllViaShizuku()
         }
         addAction("Сбросить настройки", "Вернуть значения по умолчанию (чаты, заметки и профиль не затрагиваются)") {
             androidx.appcompat.app.AlertDialog.Builder(this)
@@ -447,6 +469,24 @@ class SettingsActivity : AppCompatActivity() {
         })
     }
 
+    /** Все разрешения одной кнопкой: файлы, микрофон, контакты, специальные возможности, уведомления, батарея. */
+    private fun grantAllViaShizuku() {
+        if (!ShizukuShell.enabled(this)) ShizukuShell.setEnabled(this, true)
+        if (!Shell.available(this)) {
+            Toast.makeText(this, "Shizuku: ${ShizukuShell.state(this).text}. Запусти Shizuku и выдай ему разрешение для Assistant.", Toast.LENGTH_LONG).show()
+            ShizukuShell.requestPermission(this)
+            return
+        }
+        Toast.makeText(this, "Выдаю разрешения…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val report = try { ShizukuPower.report(ShizukuPower.grantAll(this)) } catch (e: Exception) { "Ошибка: ${e.message}" }
+            runOnUiThread {
+                androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Разрешения через Shizuku").setMessage(report)
+                    .setPositiveButton("Ок") { _, _ -> recreate() }.show()
+            }
+        }.start()
+    }
+
     private fun showShizuku() {
         val on = ShizukuShell.enabled(this)
         val state = ShizukuShell.state(this)
@@ -454,7 +494,8 @@ class SettingsActivity : AppCompatActivity() {
             if (on) "Выключить консоль" else "Включить консоль",
             "Запросить разрешение у Shizuku",
             "Открыть Shizuku",
-            "Проверить консоль (покажет точную причину)"
+            "Проверить консоль (покажет точную причину)",
+            "Выдать ассистенту все разрешения через Shizuku"
         )
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Консоль (Shizuku): ${state.text}")
@@ -469,6 +510,7 @@ class SettingsActivity : AppCompatActivity() {
                         val ok = ShizukuShell.requestPermission(this)
                         Toast.makeText(this, if (ok) "Подтверди запрос в Shizuku и открой этот экран снова" else "Сначала запусти Shizuku", Toast.LENGTH_LONG).show()
                     }
+                    4 -> grantAllViaShizuku()
                     3 -> {
                         val report = ShizukuShell.selfTest(this)
                         androidx.appcompat.app.AlertDialog.Builder(this)

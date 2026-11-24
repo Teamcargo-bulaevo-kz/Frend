@@ -314,15 +314,65 @@ object Tools {
                 "Состояние телефона: заряд батареи, сеть, оперативная память, место на телефоне, приложения по времени использования и по занятому месту, процессы. Цифры о телефоне бери только отсюда, не называй из памяти.",
                 listOf(
                     "section" to choice(
-                        "Что показать: battery — заряд; network — сеть; memory — оперативная память; storage — место на телефоне; memory_all — оба вида памяти; apps_storage — какие приложения занимают место; apps_usage — какие приложения чаще используются; processes — процессы и память по приложениям; all — общая сводка",
-                        listOf("battery", "network", "memory", "storage", "memory_all", "apps_storage", "apps_usage", "processes", "all")
+                        "Что показать: battery — заряд; battery_health — износ батареи и циклы; network — сеть; memory — оперативная память; storage — место на телефоне; memory_all — оба вида памяти; files — какие файлы занимают место (по типам и папкам); big_files — самые большие файлы; duplicates — одинаковые файлы; apps_storage — какие приложения занимают место; apps_usage — какие приложения чаще используются; processes — процессы и память по приложениям; device — модель, Android, время работы; all — сводка; full — полный отчёт",
+                        listOf("battery", "battery_health", "network", "memory", "storage", "memory_all", "files", "big_files", "duplicates", "apps_storage", "apps_usage", "processes", "device", "all", "full")
                     )
                 ),
                 listOf("section")
             ))
             put(tool(
+                "screen_control",
+                "Управляет телефоном вместо пальцев: back — назад, home — домой, recents — недавние, notifications — уведомления, quick_settings — шторка, lock — заблокировать экран, power — меню питания, screenshot — скриншот, split — разделить экран, click — нажать кнопку/пункт по названию text, scroll — пролистать (direction up/down/left/right), type — ввести text в поле ввода.",
+                listOf(
+                    "action" to choice("Что сделать", listOf("back", "home", "recents", "notifications", "quick_settings", "lock", "power", "screenshot", "split", "click", "scroll", "type")),
+                    "text" to text("Для click — надпись на кнопке; для type — что ввести"),
+                    "direction" to choice("Для scroll", listOf("up", "down", "left", "right"))
+                ),
+                listOf("action")
+            ))
+            put(tool(
+                "screen_translate",
+                "Переводит всё, что на экране, прямо поверх (надписи на своих местах), а текст на картинках — карточкой. По просьбе «переведи экран», «что тут написано по-русски».",
+                listOf("language" to text("На какой язык, по умолчанию русский")),
+                emptyList()
+            ))
+            put(tool(
+                "live_screen",
+                "Живой экран: on — ассистент смотрит на экран, когда спрашивают о видимом (снимок экрана идёт модели), у края экрана кнопки «спросить» и «перевести»; off — выключить.",
+                listOf("on" to flag("true — включить, false — выключить")),
+                listOf("on")
+            ))
+            put(tool(
+                "files",
+                "Порядок в файлах (ничего не удаляет): organize — разложить папку по подпапкам (по типу, месяцу или расширению), undo — вернуть как было; storage — что занимает место; big — самые большие файлы; duplicates — одинаковые файлы.",
+                listOf(
+                    "action" to choice("Что сделать", listOf("organize", "undo", "storage", "big", "duplicates")),
+                    "folder" to text("Папка: загрузки (по умолчанию), документы, скриншоты, входящие или путь от корня памяти"),
+                    "by" to choice("Как раскладывать", listOf("type", "date", "extension"))
+                ),
+                listOf("action")
+            ))
+            put(tool(
+                "notifications",
+                "Читает последние уведомления («что пришло», «что написали в Телеграме»). app — фильтр по приложению.",
+                listOf("app" to text("Название приложения, если просят только от него")),
+                emptyList()
+            ))
+            put(tool(
+                "close_app",
+                "Закрывает (останавливает) приложение по названию. Ничего не удаляет. Нужен Shizuku.",
+                listOf("name" to text("Название приложения")),
+                listOf("name")
+            ))
+            put(tool(
+                "grant_permissions",
+                "Выдаёт ассистенту все нужные разрешения через Shizuku одной командой (файлы, микрофон, контакты, уведомления, специальные возможности, батарея).",
+                emptyList(),
+                emptyList()
+            ))
+            put(tool(
                 "read_screen",
-                "Читает текст с открытого сейчас экрана (по просьбе «что на экране», «о чём эта статья», «переведи это», «что за ошибка»). Потом ответь на вопрос пользователя по этому тексту.",
+                "Отвечает на вопрос о том, что сейчас на экране (смотрит снимок экрана): «что на экране», «о чём эта статья», «что за ошибка», «помоги ответить».",
                 emptyList(),
                 emptyList()
             ))
@@ -424,11 +474,18 @@ object Tools {
         "web" to listOf("web_search", "schedule_digest", "list_digests", "cancel_digest", "set_profile"),
         "profile" to listOf("set_profile"),
         "system" to listOf("quick_setting", "set_brightness"),
-        "device" to listOf("device_info", "read_screen")
+        "device" to listOf("device_info", "read_screen", "notifications", "grant_permissions"),
+        "screen" to listOf("screen_control", "screen_translate", "live_screen", "read_screen", "close_app"),
+        "filesort" to listOf("files")
     )
 
     /** Признаки (начала слов) в тексте, по которым понятно, какие функции могут понадобиться. */
     private val groupKeys: Map<String, List<String>> = mapOf(
+        "screen" to listOf(
+            "экран", "нажми", "кликни", "тапни", "прокрут", "пролист", "листай", "назад", "домой", "недавн", "заблокир",
+            "введи", "напечатай", "переведи", "перевод", "живой", "закрой", "останови", "скриншот", "шторк"
+        ),
+        "filesort" to listOf("разлож", "отсортир", "сортир", "порядок", "дубликат", "одинаков", "больш", "занимает", "место", "загрузк", "файл", "верни"),
         "alarm" to listOf("будильник", "разбуд", "заведи"),
         "music" to listOf(
             "музык", "песн", "трек", "плейлист", "громк", "тише", "громче", "потише", "погромче", "пауз",

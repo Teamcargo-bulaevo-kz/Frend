@@ -47,15 +47,45 @@ object WakeWord {
         return distance(w, t) <= allowed(t)
     }
 
+    /** Слова, после которых «пятница» — это день недели, а не обращение («в пятницу», «до пятницы», «эту пятницу»). */
+    private val blockers = setOf(
+        "в", "во", "на", "до", "по", "с", "со", "к", "ко", "от", "про", "за", "после", "между", "перед", "под", "через",
+        "каждую", "каждой", "каждая", "эту", "этой", "эта", "ту", "той", "следующую", "следующей", "следующая",
+        "прошлую", "прошлой", "прошлая", "ближайшую", "ближайшей", "черная", "черную", "черной", "страстная", "страстную",
+        "какую", "какой", "какая", "одну", "одной", "всю", "всей", "до", "сегодня", "завтра", "вчера", "уже", "будет", "была", "был"
+    )
+
+    /** Слова, которые можно сказать перед обращением: «эй, пятница», «ну пятница». */
+    private val fillers = setOf("эй", "ну", "слушай", "о", "так", "алло", "хей", "ой", "а", "привет", "скажи", "окей", "ок", "здравствуй", "добрый", "доброе", "утро", "день", "вечер")
+
+    /** Строгое совпадение для слова не в начале фразы: почти точно и в именительном падеже. */
+    private fun strict(word: String, wake: String): Boolean {
+        val t = clean(wake)
+        val w = TextMatch.normalize(word).replace(" ", "")
+        if (t == DEFAULT) return w == "пятница" || (w.endsWith("а") && distance(w, t) <= 1)
+        return distance(w, t) <= 1
+    }
+
+    /** Обращение ли это в позиции [i]: учитывает слова перед ним, чтобы день недели в речи не будил ассистента. */
+    private fun addressed(words: List<String>, i: Int, candidate: String, wake: String): Boolean {
+        val prev = words.getOrNull(i - 1)
+        if (prev != null && prev in blockers) return false
+        val before = words.take(i)
+        if (before.all { it in fillers }) return true
+        // Перед словом что-то значимое: принимаем только близко к началу и только точное обращение
+        return i <= 3 && strict(candidate, wake)
+    }
+
     /**
      * Если в тексте есть слово активации, возвращает команду после него (может быть пустой), иначе null.
-     * Учитывает, что слово могло распознаться как два слова («пят ница»).
+     * Учитывает, что слово могло распознаться как два слова («пят ница»), и пропускает упоминания дня недели
+     * в обычной речи («встретимся в пятницу»).
      */
     fun commandAfter(text: String, wake: String = target): String? {
         val words = TextMatch.normalize(text).split(' ').filter { it.isNotEmpty() }
         for (i in words.indices) {
-            if (isWakeWord(words[i], wake)) return words.drop(i + 1).joinToString(" ")
-            if (i + 1 < words.size && isWakeWord(words[i] + words[i + 1], wake)) {
+            if (isWakeWord(words[i], wake) && addressed(words, i, words[i], wake)) return words.drop(i + 1).joinToString(" ")
+            if (i + 1 < words.size && isWakeWord(words[i] + words[i + 1], wake) && addressed(words, i, words[i] + words[i + 1], wake)) {
                 return words.drop(i + 2).joinToString(" ")
             }
         }

@@ -50,6 +50,20 @@ object DeviceActions {
                     else DeviceReport.appsByUsage(DeviceStatus.usage(app))
                 }
                 "processes" -> processes(app)
+                "battery_health" -> batteryHealth(app)
+                "device" -> deviceLine(app)
+                "files" -> FileOrganizer.storageReport()
+                "big_files" -> FileOrganizer.biggestFiles()
+                "duplicates" -> FileOrganizer.duplicates()
+                "full" -> listOf(
+                    deviceLine(app),
+                    DeviceReport.battery(DeviceStatus.battery(app)),
+                    batteryHealth(app).takeIf { Shell.available(app) }.orEmpty(),
+                    DeviceReport.network(DeviceStatus.network(app)),
+                    DeviceReport.memory(DeviceStatus.memory(app)),
+                    DeviceReport.storage(DeviceStatus.storage()),
+                    if (DeviceStatus.hasUsageAccess(app)) DeviceReport.appsByUsage(DeviceStatus.usage(app)).lines().take(4).joinToString("\n") else ""
+                ).filter { it.isNotBlank() }.joinToString("\n")
                 else -> listOf(
                     DeviceReport.battery(DeviceStatus.battery(app)),
                     DeviceReport.network(DeviceStatus.network(app)),
@@ -60,6 +74,24 @@ object DeviceActions {
         } catch (e: Exception) {
             "Не получилось узнать: ${e.message ?: e.javaClass.simpleName}"
         }
+    }
+
+    /** Модель, версия Android, сколько работает без перезагрузки. */
+    fun deviceLine(context: Context): String {
+        val up = android.os.SystemClock.elapsedRealtime() / 60_000
+        val upText = if (up >= 60 * 24) "${up / (60 * 24)} дн ${up / 60 % 24} ч" else if (up >= 60) "${up / 60} ч ${up % 60} мин" else "$up мин"
+        val patch = if (android.os.Build.VERSION.SDK_INT >= 23) android.os.Build.VERSION.SECURITY_PATCH else ""
+        return "${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE}" +
+            (if (patch.isNotBlank()) " (обновление безопасности $patch)" else "") + ". Работает без перезагрузки $upText."
+    }
+
+    /** Износ батареи и число циклов зарядки (через Shizuku, если телефон отдаёт эти данные). */
+    fun batteryHealth(context: Context): String {
+        if (!Shell.available(context)) return "Износ батареи и циклы зарядки покажу после подключения Shizuku."
+        fun read(name: String): Long? = listOf("battery", "bms").firstNotNullOfOrNull { dir ->
+            Shell.run("cat /sys/class/power_supply/$dir/$name", 4000).takeIf { it.ok }?.output?.trim()?.toLongOrNull()
+        }
+        return BatteryWear.describe(read("cycle_count"), read("charge_full"), read("charge_full_design"))
     }
 
     /** Память по процессам. Нужна консоль (Shizuku); без неё честно говорим об этом и даём то, что можно. */

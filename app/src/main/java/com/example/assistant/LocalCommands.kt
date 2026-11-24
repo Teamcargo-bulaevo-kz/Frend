@@ -50,6 +50,7 @@ object LocalCommands {
         // Составная просьба («включи фонарик и поставь будильник») — это для модели: она вызовет несколько функций
         if (w.any { it == "и" || it == "потом" || it == "затем" }) return null
 
+        parseScreen(text, t, w)?.let { return it }
         parseTimeQuestion(t, now)?.let { return it }
         parseAlarm(t, w, now)?.let { return it }
         parseTimer(w)?.let { return it }
@@ -527,6 +528,79 @@ object LocalCommands {
         return null
     }
 
+    // ---------------------------------------------------------------- экран, файлы, уведомления, разрешения
+
+    private val screenExact: Map<String, LocalCommand> by lazy {
+        fun c(action: String, vararg extra: Pair<String, Any?>) = LocalCommand("screen_control", mapOf("action" to action) + extra)
+        val m = LinkedHashMap<String, LocalCommand>()
+        listOf("кнопка назад", "нажми назад", "вернись на предыдущий экран", "назад на экране", "шаг назад").forEach { m[it] = c("back") }
+        listOf("домой", "на главный экран", "главный экран", "выйди на главный экран", "на рабочий стол", "сверни все", "сверни всё").forEach { m[TextMatch.normalize(it)] = c("home") }
+        listOf("недавние", "недавние приложения", "покажи недавние", "открой недавние", "список приложений").forEach { m[it] = c("recents") }
+        listOf("открой уведомления", "опусти шторку уведомлений", "покажи шторку уведомлений").forEach { m[it] = c("notifications") }
+        listOf("открой шторку", "опусти шторку", "быстрые настройки").forEach { m[it] = c("quick_settings") }
+        listOf("заблокируй экран", "заблокируй телефон", "выключи экран", "погаси экран", "блокировка экрана").forEach { m[it] = c("lock") }
+        listOf("раздели экран", "разделить экран", "два окна").forEach { m[it] = c("split") }
+        listOf("листай вниз", "пролистай вниз", "прокрути вниз", "листай дальше", "пролистай", "прокрути", "ниже", "дальше листай").forEach { m[it] = c("scroll", "direction" to "down") }
+        listOf("листай вверх", "пролистай вверх", "прокрути вверх", "выше", "наверх").forEach { m[it] = c("scroll", "direction" to "up") }
+        listOf("что на экране", "что у меня на экране", "что тут написано", "что здесь написано", "что это на экране", "посмотри на экран", "глянь на экран", "объясни что на экране")
+            .forEach { m[it] = LocalCommand("read_screen") }
+        listOf("включи живой экран", "живой экран", "смотри на экран", "смотри мой экран", "покажу тебе экран", "давай покажу экран", "включи показ экрана")
+            .forEach { m[it] = LocalCommand("live_screen", mapOf("on" to true)) }
+        listOf("выключи живой экран", "не смотри на экран", "хватит смотреть на экран", "выключи показ экрана")
+            .forEach { m[it] = LocalCommand("live_screen", mapOf("on" to false)) }
+        listOf("прочитай уведомления", "что пришло", "какие уведомления", "какие у меня уведомления", "что нового", "есть уведомления", "что в уведомлениях", "кто писал", "кто мне писал")
+            .forEach { m[it] = LocalCommand("notifications") }
+        listOf("выдай все разрешения", "выдай разрешения", "дай себе все разрешения", "выдай себе разрешения через шизуку", "выдай все разрешения через шизуку")
+            .forEach { m[it] = LocalCommand("grant_permissions") }
+        listOf("верни файлы как было", "верни файлы", "отмени сортировку", "верни файлы на место", "отмени сортировку файлов").forEach { m[it] = LocalCommand("files", mapOf("action" to "undo")) }
+        listOf("найди дубликаты", "найди одинаковые файлы", "одинаковые файлы", "дубликаты файлов", "есть ли дубликаты").forEach { m[it] = LocalCommand("files", mapOf("action" to "duplicates")) }
+        listOf("самые большие файлы", "большие файлы", "покажи большие файлы", "какие файлы самые большие", "найди большие файлы").forEach { m[it] = LocalCommand("files", mapOf("action" to "big")) }
+        listOf("какие файлы занимают место", "что занимает место в файлах", "файлы по типам", "сколько места занимают фото", "сколько места занимают видео")
+            .forEach { m[it] = LocalCommand("files", mapOf("action" to "storage")) }
+        m
+    }
+
+    /** Управление экраном, переводчик, живой экран, порядок в файлах, уведомления, разрешения. */
+    private fun parseScreen(raw: String, t: String, w: List<String>): LocalCommand? {
+        screenExact[t]?.let { return it }
+        // «переведи экран», «переведи экран на английский», «переведи что на экране»
+        if (w.firstOrNull()?.startsWith("перевед") == true && w.any { it.startsWith("экран") || it == "тут" || it == "здесь" || it == "страницу" || it == "приложение" }) {
+            return LocalCommand("screen_translate", mapOf("language" to TranslateBatch.targetFrom(t)))
+        }
+        // «нажми отправить», «нажми на кнопку ок»
+        if (w.size in 2..7 && (w[0] == "нажми" || w[0] == "кликни" || w[0] == "тапни" || w[0] == "ткни")) {
+            var rest = w.drop(1)
+            if (rest.firstOrNull() == "на") rest = rest.drop(1)
+            if (rest.firstOrNull()?.startsWith("кнопк") == true) rest = rest.drop(1)
+            if (rest.isNotEmpty() && rest.joinToString(" ") != "назад") return LocalCommand("screen_control", mapOf("action" to "click", "text" to rest.joinToString(" ")))
+        }
+        // «введи привет как дела», «напечатай …» — текст как сказан
+        if (w.size >= 2 && (w[0] == "введи" || w[0] == "напечатай" || w[0] == "впиши")) {
+            val textToType = raw.trim().substringAfter(' ').trim()
+            if (textToType.isNotEmpty()) return LocalCommand("screen_control", mapOf("action" to "type", "text" to textToType))
+        }
+        // «закрой приложение телеграм», «останови ютуб»
+        if (w.size in 2..5 && (w[0] == "закрой" || w[0] == "останови" || w[0] == "выключи") && w.getOrNull(1)?.startsWith("приложени") == true && w.size >= 3) {
+            return LocalCommand("close_app", mapOf("name" to w.drop(2).joinToString(" ")))
+        }
+        // «разложи загрузки», «наведи порядок в загрузках по датам», «отсортируй документы»
+        val sortVerb = w.firstOrNull()?.let { it.startsWith("разлож") || it.startsWith("отсортир") || it.startsWith("рассортир") || it == "наведи" || it == "упорядочи" } == true
+        if (sortVerb && w.size <= 8 && (w.any { it.startsWith("файл") || it.startsWith("загруз") || it.startsWith("документ") || it.startsWith("скрин") || it.startsWith("входящ") || it.startsWith("скачан") })) {
+            val folder = w.firstOrNull { it.startsWith("загруз") || it.startsWith("документ") || it.startsWith("скрин") || it.startsWith("входящ") || it.startsWith("скачан") }
+            val by = when {
+                w.any { it.startsWith("дат") || it.startsWith("месяц") } -> "date"
+                w.any { it.startsWith("расширени") } -> "extension"
+                else -> "type"
+            }
+            return LocalCommand("files", mapOf("action" to "organize", "folder" to folder, "by" to by))
+        }
+        // «что пришло в телеграме», «что написали в ватсапе», «уведомления от почты»
+        Regex("^(?:что (?:пришло|написали|новое|нового)|прочитай уведомления|уведомления|кто писал) (?:в|во|из|от) (.+)$").find(t)?.let {
+            return LocalCommand("notifications", mapOf("app" to it.groupValues[1]))
+        }
+        return null
+    }
+
     // ---------------------------------------------------------------- волны и подборки
 
     private val myWavePhrases = setOf(
@@ -688,6 +762,10 @@ object LocalCommands {
         if (w.size > 9 || w.any { it in deviceControlVerbs }) return null
         fun has(vararg stems: String) = w.any { x -> stems.any { x.startsWith(it) } }
         fun cmd(section: String) = LocalCommand("device_info", mapOf("section" to section))
+
+        if (has("износ", "цикл", "здоровь", "емкост", "ёмкост") && has("батаре", "аккумулятор")) return cmd("battery_health")
+        if (has("полн", "подробн", "весь", "всю") && has("отчет", "отчёт", "состоян", "информац", "сводк") && !has("заметк")) return cmd("full")
+        if (has("модел", "верси") && has("телефон", "андроид", "android", "устройств") && w.size <= 6) return cmd("device")
 
         val asks = has("сколько", "как", "что", "покажи", "скажи", "узнай", "проверь", "когда", "есть", "работает")
         if (!asks && !has("статистик", "статус", "сводк", "диагностик")) return null

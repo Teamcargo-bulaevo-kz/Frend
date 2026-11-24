@@ -23,9 +23,46 @@ object ShellPolicy {
         Regex("""top -b -n 1( -m \d{1,3})?"""),
         Regex("""cmd package list packages( -3| -s| -d| -e)?"""),
         Regex("""cat /proc/(meminfo|loadavg|uptime)"""),
+        Regex("""cat /sys/class/power_supply/(battery|bms)/(cycle_count|charge_full|charge_full_design|health|capacity)"""),
         Regex("""df( -h)?"""),
         Regex("""getprop ro\.build\.version\.(release|sdk)""")
     )
+
+    /** Настройки, которые консоли можно менять (без приватных данных и без опасного: только переключатели). */
+    private val settingKeys = "airplane_mode_on|location_mode|mobile_data|enabled_accessibility_services|accessibility_enabled|" +
+        "screen_off_timeout|stay_on_while_plugged_in|enabled_notification_listeners|zen_mode|bluetooth_on|wifi_on|nfc_on"
+
+    /**
+     * Команды управления: переключатели (Wi-Fi, Bluetooth, данные, режим полёта, геолокация, «Не беспокоить», NFC),
+     * выдача разрешений ТОЛЬКО этому приложению, закрытие приложения, кнопки. Ничего не удаляют и не ставят.
+     * [own] — имя пакета этого приложения: разрешения можно выдавать только ему.
+     */
+    fun isControl(command: String, own: String): Boolean {
+        val c = command.trim()
+        if (c.isEmpty() || c.length > 400) return false
+        if (forbidden.containsMatchIn(c)) return false
+        val pkg = Regex.escape(own)
+        val control = listOf(
+            Regex("""svc (wifi|data|bluetooth|nfc) (enable|disable)"""),
+            Regex("""svc power stayon (true|false|usb|ac)"""),
+            Regex("""cmd bluetooth_manager (enable|disable)"""),
+            Regex("""cmd wifi set-wifi-enabled (enabled|disabled)"""),
+            Regex("""cmd connectivity airplane-mode (enable|disable)"""),
+            Regex("""cmd location set-location-enabled (true|false)"""),
+            Regex("""cmd notification set_dnd (on|off|priority|alarms|none)"""),
+            Regex("""cmd notification allow_listener $pkg/[A-Za-z0-9._$]+"""),
+            Regex("""cmd statusbar (expand-notifications|expand-settings|collapse)"""),
+            Regex("""cmd deviceidle whitelist \+$pkg"""),
+            Regex("""settings get (global|secure|system) [a-z_]+"""),
+            Regex("""settings put (global|secure|system) ($settingKeys) [A-Za-z0-9._/:\-]{1,300}"""),
+            Regex("""pm grant $pkg android\.permission\.[A-Z_]+"""),
+            Regex("""appops set $pkg [A-Z_]+ (allow|deny|default|ignore)"""),
+            Regex("""am force-stop (?!android$|com\.android\.systemui$|$pkg$|com\.android\.phone$)[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+"""),
+            Regex("""am broadcast -a android\.intent\.action\.AIRPLANE_MODE --ez state (true|false)"""),
+            Regex("""input keyevent \d{1,3}""")
+        )
+        return control.any { it.matches(c) }
+    }
 
     fun isAllowed(command: String): Boolean {
         val c = command.trim()
@@ -109,6 +146,16 @@ object ShizukuShell : ShellBackend {
 
     override fun run(command: String, timeoutMs: Long): ShellResult {
         if (!ShellPolicy.isAllowed(command)) return ShellResult(false, "Команда не разрешена")
+        return exec(command, timeoutMs)
+    }
+
+    /** Команда управления (см. [ShellPolicy.isControl]). own — имя пакета приложения. */
+    fun control(command: String, own: String, timeoutMs: Long = 15_000L): ShellResult {
+        if (!ShellPolicy.isControl(command, own)) return ShellResult(false, "Команда не разрешена")
+        return exec(command, timeoutMs)
+    }
+
+    private fun exec(command: String, timeoutMs: Long): ShellResult {
         return try {
             val method = Shizuku::class.java.getDeclaredMethod(
                 "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java

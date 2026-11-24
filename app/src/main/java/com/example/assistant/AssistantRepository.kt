@@ -68,7 +68,11 @@ class AssistantRepository(private val context: Context, apiKey: String) {
     /**
      * @param fromVoice запрос пришёл голосом: модель предупреждаем, что распознавание могло исказить слова.
      */
+    /** Текущий запрос пользователя: нужен функциям, которые отвечают на него сами (вопрос про экран). */
+    private var currentPrompt = ""
+
     suspend fun handle(prompt: String, fromVoice: Boolean = false): String {
+        currentPrompt = prompt
         // Ответ на вопрос «Удалить? Скажи да или нет»
         val waiting = pendingState
         if (waiting != null) {
@@ -97,6 +101,12 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         // Уровень 1: правила
         LocalCommands.parse(prompt)?.let { command ->
             runLocal(command)?.let { return it }
+        }
+        // «Живой экран»: вопрос о том, что видно, — сразу со снимком экрана модели со зрением
+        if (ScreenAssist.live(context) && ScreenAssist.aboutScreen(prompt)) {
+            val answer = ScreenAssist.ask(context, prompt)
+            withContext(Dispatchers.Main) { ScreenOverlay.showCard("Про экран", answer) }
+            return answer
         }
         // «Включи Imagine Dragons»: если такое есть в музыке телефона, модель не нужна
         LocalCommands.musicCandidate(prompt)?.let { query ->
@@ -317,6 +327,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         val want: Boolean? = when (state.lowercase()) { "on" -> true; "off" -> false; else -> null }
         if (TextMatch.normalize(setting).contains("фонар")) return PhoneActions.setFlashlight(context, want ?: true)
         if (QuickSettings.resolve(setting) == "rotation") return withContext(Dispatchers.IO) { SystemActions.rotation(context, want) }
+        // Через Shizuku переключаем напрямую: быстрее и надёжнее, чем нажимать плитку в шторке
+        withContext(Dispatchers.IO) { ShizukuPower.toggle(context, QuickSettings.resolve(setting), want, setting) }?.let { return it }
         val service = AssistantAccessibilityService.instance
         if (service == null || !service.hasWindowAccess()) {
             PhoneActions.launch(context, android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -433,7 +445,25 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             "find_contact" -> withContext(Dispatchers.IO) { ContactActions.info(context, a.optString("name", "")) }
 
             "device_info" -> withContext(Dispatchers.IO) { DeviceActions.report(context, a.optString("section", "all")) }
-            "read_screen" -> withContext(Dispatchers.IO) { DeviceActions.readScreen(context) }
+            "read_screen" -> ScreenAssist.ask(context, currentPrompt)
+            "screen_control" -> ScreenActions.control(context, a.optString("action", ""), a.optStringOrNull("text"), a.optStringOrNull("direction"))
+            "screen_translate" -> ScreenAssist.translate(context, TranslateBatch.targetFrom(a.optString("language", "русский")))
+            "live_screen" -> ScreenAssist.setLive(context, a.optBoolean("on", true))
+            "files" -> withContext(Dispatchers.IO) {
+                when (a.optString("action", "storage")) {
+                    "organize" -> FileOrganizer.organize(context, a.optStringOrNull("folder"), a.optStringOrNull("by"), confirmed)
+                    "undo" -> FileOrganizer.undo(context, confirmed)
+                    "big" -> FileOrganizer.biggestFiles()
+                    "duplicates" -> FileOrganizer.duplicates(a.optStringOrNull("folder"))
+                    else -> FileOrganizer.storageReport()
+                }
+            }
+            "notifications" -> NotificationActions.read(context, a.optStringOrNull("app"))
+            "close_app" -> withContext(Dispatchers.IO) { ScreenActions.closeApp(context, a.optString("name", ""), confirmed) }
+            "grant_permissions" -> withContext(Dispatchers.IO) {
+                if (!Shell.available(context)) "Shizuku: ${ShizukuShell.state(context).text}. Включи консоль в настройках и выдай Shizuku разрешение для Assistant."
+                else ShizukuPower.report(ShizukuPower.grantAll(context))
+            }
             "web_search" -> webSearchChecked(a.optString("query", ""))
             "set_profile" -> setProfile(a.optString("field", ""), a.optString("value", ""))
             "schedule_digest" -> DigestActions.add(context, a.optString("topic", ""), a.optStringOrNull("time"))

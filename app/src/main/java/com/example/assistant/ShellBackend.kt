@@ -31,6 +31,13 @@ object Shell {
 
     fun available(context: Context) = backend.available(context)
     fun run(command: String, timeoutMs: Long = 25_000L) = backend.run(command, timeoutMs)
+
+    /** Команда управления через Shizuku (переключатели, разрешения этому приложению). Без Shizuku — отказ. */
+    fun control(context: Context, command: String, timeoutMs: Long = 15_000L): ShellResult {
+        val b = backend
+        if (b !is ShizukuShell || !b.available(context)) return ShellResult(false, "Shizuku не подключён")
+        return b.control(command, context.packageName, timeoutMs)
+    }
 }
 
 /** Память одного процесса из `dumpsys meminfo` (раздел «Total PSS by process»). */
