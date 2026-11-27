@@ -27,6 +27,7 @@ object SystemState {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.isLocationEnabled
                 else Settings.Secure.getInt(app.contentResolver, Settings.Secure.LOCATION_MODE, 0) != 0
             }
+            "mobile_data" -> mobileData(app)
             "battery_saver" -> (app.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isPowerSaveMode
             "nfc" -> android.nfc.NfcAdapter.getDefaultAdapter(app)?.isEnabled
             "dnd" -> (app.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager)?.let {
@@ -36,6 +37,15 @@ object SystemState {
         }
     } catch (e: Exception) {
         null
+    }
+
+    /** Мобильный интернет: системная настройка mobile_data (общая или для основной SIM). */
+    private fun mobileData(app: Context): Boolean? {
+        val r = app.contentResolver
+        val sub = try { android.telephony.SubscriptionManager.getDefaultDataSubscriptionId() } catch (e: Exception) { -1 }
+        val perSim = if (sub >= 0) try { Settings.Global.getInt(r, "mobile_data$sub") } catch (e: Exception) { null } else null
+        val common = try { Settings.Global.getInt(r, "mobile_data") } catch (e: Exception) { null }
+        return (perSim ?: common)?.let { it == 1 }
     }
 
     private fun bluetooth(app: Context): Boolean? {

@@ -327,16 +327,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         val want: Boolean? = when (state.lowercase()) { "on" -> true; "off" -> false; else -> null }
         if (TextMatch.normalize(setting).contains("фонар")) return PhoneActions.setFlashlight(context, want ?: true)
         if (QuickSettings.resolve(setting) == "rotation") return withContext(Dispatchers.IO) { SystemActions.rotation(context, want) }
-        // Через Shizuku переключаем напрямую: быстрее и надёжнее, чем нажимать плитку в шторке
-        withContext(Dispatchers.IO) { ShizukuPower.toggle(context, QuickSettings.resolve(setting), want, setting) }?.let { return it }
-        val service = AssistantAccessibilityService.instance
-        if (service == null || !service.hasWindowAccess()) {
-            PhoneActions.launch(context, android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            return "Чтобы переключать Wi-Fi, Bluetooth и другое из шторки, включи службу «Assistant» в специальных возможностях " +
-                "(если уже включена, выключи и включи заново: после обновления ей нужны новые права). " +
-                "Если пункт серый: Настройки → Приложения → Assistant → меню ⋮ → «Разрешить ограниченные настройки»."
-        }
-        return service.quickSetting(setting, want)
+        // Shizuku → сами → плитка в шторке → экран настроек, с проверкой результата и журналом (SystemToggle)
+        return SystemToggle.set(context, setting, want)
     }
 
     /** Распознаёт текст на картинке из общей папки моделью с «зрением». */

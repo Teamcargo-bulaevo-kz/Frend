@@ -51,6 +51,7 @@ object DeviceActions {
                 }
                 "processes" -> processes(app)
                 "battery_health" -> batteryHealth(app)
+                "toggles" -> SystemToggle.diagnose(app)
                 "device" -> deviceLine(app)
                 "files" -> FileOrganizer.storageReport()
                 "big_files" -> FileOrganizer.biggestFiles()

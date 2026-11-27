@@ -550,6 +550,8 @@ object LocalCommands {
             .forEach { m[it] = LocalCommand("live_screen", mapOf("on" to false)) }
         listOf("прочитай уведомления", "что пришло", "какие уведомления", "какие у меня уведомления", "что нового", "есть уведомления", "что в уведомлениях", "кто писал", "кто мне писал")
             .forEach { m[it] = LocalCommand("notifications") }
+        listOf("проверь переключатели", "почему не выключается интернет", "почему не работают переключатели", "проверь шизуку", "проверь shizuku")
+            .forEach { m[it] = LocalCommand("device_info", mapOf("section" to "toggles")) }
         listOf("выдай все разрешения", "выдай разрешения", "дай себе все разрешения", "выдай себе разрешения через шизуку", "выдай все разрешения через шизуку")
             .forEach { m[it] = LocalCommand("grant_permissions") }
         listOf("верни файлы как было", "верни файлы", "отмени сортировку", "верни файлы на место", "отмени сортировку файлов").forEach { m[it] = LocalCommand("files", mapOf("action" to "undo")) }

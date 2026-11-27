@@ -312,6 +312,16 @@ class SettingsActivity : AppCompatActivity() {
         addAction("Консоль (Shizuku)", "Процессы, выдача разрешений, переключатели без шторки. Статус: ${ShizukuShell.state(this).text}") {
             showShizuku()
         }
+        addAction("Проверить переключатели", "Почему ассистент не может включить или выключить Wi-Fi, интернет, Bluetooth: Shizuku, службы, разрешения") {
+            Thread {
+                val report = try { SystemToggle.diagnose(this) } catch (e: Exception) { "Ошибка: ${e.message}" }
+                runOnUiThread {
+                    androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Переключатели").setMessage(report)
+                        .setPositiveButton("Ок", null)
+                        .setNeutralButton("Выдать разрешения") { _, _ -> grantAllViaShizuku() }.show()
+                }
+            }.start()
+        }
         addAction("Выдать все разрешения через Shizuku", "Файлы, микрофон, контакты, уведомления, специальные возможности, без ограничений батареи — одной кнопкой") {
             grantAllViaShizuku()
         }

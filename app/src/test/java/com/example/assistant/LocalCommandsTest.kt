@@ -359,4 +359,10 @@ class LocalCommandsTest {
         // «назад» по-прежнему — предыдущий трек
         assertCmd("назад", "music_control", "action" to "previous")
     }
+
+    @Test fun internetToggleAndDiagnostics() {
+        assertCmd("отключи интернет", "quick_setting", "setting" to "интернет", "state" to "off")
+        assertCmd("выключи вай фай", "quick_setting", "setting" to "вай фай", "state" to "off")
+        assertCmd("проверь переключатели", "device_info", "section" to "toggles")
+    }
 }

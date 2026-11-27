@@ -45,10 +45,13 @@ class AssistantAccessibilityService : AccessibilityService() {
         val labels = QuickSettings.labelsFor(name)
         performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
         var tile: AccessibilityNodeInfo? = null
-        for (attempt in 0 until 6) {
+        for (attempt in 0 until 8) {
             delay(if (attempt == 0) 900 else 500)
             tile = findTile(labels)
             if (tile != null) break
+            // Плитки нет на первом экране шторки: раскрываем её полностью жестом вниз, потом листаем влево
+            if (attempt == 2) swipe(0.5f, 0.15f, 0.5f, 0.75f)
+            if (attempt == 5) swipe(0.85f, 0.35f, 0.15f, 0.35f)
         }
         if (tile == null) {
             performGlobalAction(GLOBAL_ACTION_BACK)
@@ -68,7 +71,10 @@ class AssistantAccessibilityService : AccessibilityService() {
         var clicked = false
         for (round in 0 until 2) {
             val node = if (round == 0) tile else findTile(labels)
-            if (node == null || !clickNode(node)) {
+            // Первый раз — обычным нажатием, второй (если не переключилось) — касанием центра плитки:
+            // в пункте управления MIUI/HyperOS нажатие на «кликабельного родителя» иногда ничего не делает
+            val pressed = node != null && (if (round == 0) clickNode(node) || tapCenter(node) else tapCenter(node) || clickNode(node))
+            if (!pressed) {
                 if (!clicked) {
                     closeShade()
                     return "Не получилось нажать плитку «$name»."
@@ -132,6 +138,23 @@ class AssistantAccessibilityService : AccessibilityService() {
 
     private fun closeShade() {
         performGlobalAction(GLOBAL_ACTION_BACK)
+    }
+
+    /** Жест по экрану в долях ширины и высоты. */
+    private fun swipe(x1: Float, y1: Float, x2: Float, y2: Float): Boolean {
+        val dm = resources.displayMetrics
+        val path = android.graphics.Path().apply {
+            moveTo(dm.widthPixels * x1, dm.heightPixels * y1); lineTo(dm.widthPixels * x2, dm.heightPixels * y2)
+        }
+        val g = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 280)).build()
+        return dispatchGesture(g, null, null)
+    }
+
+    private fun tapCenter(node: AccessibilityNodeInfo): Boolean {
+        val r = android.graphics.Rect()
+        node.getBoundsInScreen(r)
+        return r.width() > 0 && tap(r.exactCenterX(), r.exactCenterY())
     }
 
     private fun clickNode(node: AccessibilityNodeInfo): Boolean {

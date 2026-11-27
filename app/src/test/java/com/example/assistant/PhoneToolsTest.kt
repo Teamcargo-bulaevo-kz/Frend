@@ -36,7 +36,7 @@ class PhoneToolsTest {
     }
 
     @Test fun toggleCommands() {
-        assertEquals("svc wifi enable", ShizukuPower.toggleCommands("wifi", true)!!.first())
+        assertEquals("cmd wifi set-wifi-enabled enabled", ShizukuPower.toggleCommands("wifi", true)!!.first())
         assertEquals("svc data disable", ShizukuPower.toggleCommands("mobile_data", false)!!.first())
         assertNull(ShizukuPower.toggleCommands("hotspot", true))
         // все предлагаемые команды проходят политику
@@ -109,5 +109,15 @@ class PhoneToolsTest {
         assertTrue(ScreenAssist.aboutScreen("что тут написано"))
         assertTrue(ScreenAssist.aboutScreen("помоги ответить на это сообщение"))
         assertFalse(ScreenAssist.aboutScreen("поставь будильник на семь"))
+    }
+
+    @Test fun shellErrorsAreRecognised() {
+        assertTrue(ShellPolicy.looksLikeError("Unknown command: set-wifi-enabled"))
+        assertTrue(ShellPolicy.looksLikeError("java.lang.SecurityException: Permission Denial"))
+        assertTrue(ShellPolicy.looksLikeError("usage: svc data [enable|disable]"))
+        assertFalse(ShellPolicy.looksLikeError(""))
+        assertFalse(ShellPolicy.looksLikeError("1"))
+        assertTrue(ShellPolicy.isControl("cmd phone data disable", own))
+        assertTrue(ShellPolicy.isControl("settings put secure enabled_accessibility_services null", own))
     }
 }

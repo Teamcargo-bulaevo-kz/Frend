@@ -59,7 +59,7 @@ object ShizukuPower {
             val r = Shell.control(app, "appops set $pkg $op allow")
             steps += Step(title, r.ok, r.output.take(80).trim())
         }
-        steps += enableAccessibility(app)
+        steps += enableAccessibility(app, restart = true)
         val listener = "$pkg/${NotificationReader::class.java.name}"
         steps += Step("Чтение уведомлений", Shell.control(app, "cmd notification allow_listener $listener").ok)
         steps += Step("Без ограничений батареи (слово активации не засыпает)", Shell.control(app, "cmd deviceidle whitelist +$pkg").ok)
@@ -67,12 +67,20 @@ object ShizukuPower {
     }
 
     /** Включает службу специальных возможностей, не трогая уже включённые чужие службы. */
-    fun enableAccessibility(context: Context): Step {
+    fun enableAccessibility(context: Context, restart: Boolean = false): Step {
         val pkg = context.packageName
         val ours = "$pkg/${AssistantAccessibilityService::class.java.name}"
-        val current = Shell.control(context, "settings get secure enabled_accessibility_services").output.trim()
+        var current = Shell.control(context, "settings get secure enabled_accessibility_services").output.trim()
             .takeIf { it.isNotBlank() && it != "null" }.orEmpty()
-        if (current.split(':').any { it.equals(ours, ignoreCase = true) }) return Step("Специальные возможности", true, "уже включены")
+        val listed = current.split(':').any { it.equals(ours, ignoreCase = true) }
+        val running = AssistantAccessibilityService.instance?.hasWindowAccess() == true
+        if (listed && running && !restart) return Step("Специальные возможности", true, "уже включены")
+        if (listed) {
+            // В списке, но служба не работает (или после обновления без новых прав): выключаем и включаем заново
+            current = current.split(':').filter { it.isNotBlank() && !it.equals(ours, ignoreCase = true) }.joinToString(":")
+            Shell.control(context, "settings put secure enabled_accessibility_services ${current.ifEmpty { "null" }}")
+            Thread.sleep(500)
+        }
         val value = if (current.isEmpty()) ours else "$current:$ours"
         val put = Shell.control(context, "settings put secure enabled_accessibility_services $value")
         Shell.control(context, "settings put secure accessibility_enabled 1")
@@ -88,9 +96,9 @@ object ShizukuPower {
 
     /** Команды консоли для переключателя: по очереди, первая сработавшая. null — консолью не переключается. */
     fun toggleCommands(key: String, on: Boolean): List<String>? = when (key) {
-        "wifi" -> listOf("svc wifi ${if (on) "enable" else "disable"}", "cmd wifi set-wifi-enabled ${if (on) "enabled" else "disabled"}")
-        "bluetooth" -> listOf("svc bluetooth ${if (on) "enable" else "disable"}", "cmd bluetooth_manager ${if (on) "enable" else "disable"}")
-        "mobile_data" -> listOf("svc data ${if (on) "enable" else "disable"}")
+        "wifi" -> listOf("cmd wifi set-wifi-enabled ${if (on) "enabled" else "disabled"}", "svc wifi ${if (on) "enable" else "disable"}")
+        "bluetooth" -> listOf("cmd bluetooth_manager ${if (on) "enable" else "disable"}", "svc bluetooth ${if (on) "enable" else "disable"}")
+        "mobile_data" -> listOf("svc data ${if (on) "enable" else "disable"}", "cmd phone data ${if (on) "enable" else "disable"}")
         "nfc" -> listOf("svc nfc ${if (on) "enable" else "disable"}")
         "airplane" -> listOf(
             "cmd connectivity airplane-mode ${if (on) "enable" else "disable"}",
@@ -99,29 +107,5 @@ object ShizukuPower {
         "location" -> listOf("cmd location set-location-enabled $on", "settings put secure location_mode ${if (on) 3 else 0}")
         "dnd" -> listOf("cmd notification set_dnd ${if (on) "priority" else "off"}")
         else -> null
-    }
-
-    /**
-     * Переключает напрямую через Shizuku. null — нельзя (нет Shizuku или переключатель не поддерживается),
-     * тогда вызывающий нажимает плитку в шторке как раньше. [want] null — переключить в обратное состояние.
-     */
-    fun toggle(context: Context, key: String?, want: Boolean?, title: String): String? {
-        if (key == null || !Shell.available(context)) return null
-        val now = SystemState.isOn(context, key)
-        val target = want ?: (now?.not() ?: return null)
-        if (now == target) return "«$title» уже ${if (target) "включено" else "выключено"}"
-        val commands = toggleCommands(key, target) ?: return null
-        for (c in commands) {
-            val r = Shell.control(context, c)
-            if (!r.ok) continue
-            if (key == "airplane" && c.startsWith("settings")) Shell.control(context, "am broadcast -a android.intent.action.AIRPLANE_MODE --ez state $target")
-            // Проверяем, что телефон и правда переключился (Wi-Fi и Bluetooth включаются не мгновенно)
-            for (i in 0 until 8) {
-                val s = SystemState.isOn(context, key)
-                if (s == null || s == target) return "«$title» ${if (target) "включено" else "выключено"}"
-                Thread.sleep(400)
-            }
-        }
-        return null
     }
 }

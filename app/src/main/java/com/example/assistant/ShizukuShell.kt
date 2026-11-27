@@ -44,6 +44,7 @@ object ShellPolicy {
         val pkg = Regex.escape(own)
         val control = listOf(
             Regex("""svc (wifi|data|bluetooth|nfc) (enable|disable)"""),
+            Regex("""cmd phone data (enable|disable)"""),
             Regex("""svc power stayon (true|false|usb|ac)"""),
             Regex("""cmd bluetooth_manager (enable|disable)"""),
             Regex("""cmd wifi set-wifi-enabled (enabled|disabled)"""),
@@ -62,6 +63,13 @@ object ShellPolicy {
             Regex("""input keyevent \d{1,3}""")
         )
         return control.any { it.matches(c) }
+    }
+
+    /** Вывод команды похож на ошибку («Unknown command», «Exception», «not found», «Permission denial»). */
+    fun looksLikeError(output: String): Boolean {
+        val t = output.lowercase()
+        return listOf("unknown command", "exception", "not found", "permission denial", "securityexception", "usage:", "error:",
+            "failed", "invalid", "no shell command implementation", "can't find service", "not allowed").any { t.contains(it) }
     }
 
     fun isAllowed(command: String): Boolean {
@@ -92,7 +100,7 @@ object ShizukuShell : ShellBackend {
     override val name = "Shizuku"
 
     fun enabled(context: Context) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, false)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, true)
 
     fun setEnabled(context: Context, value: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, value).apply()
@@ -146,16 +154,17 @@ object ShizukuShell : ShellBackend {
 
     override fun run(command: String, timeoutMs: Long): ShellResult {
         if (!ShellPolicy.isAllowed(command)) return ShellResult(false, "Команда не разрешена")
-        return exec(command, timeoutMs)
+        return exec(command, timeoutMs, strict = false)
     }
 
     /** Команда управления (см. [ShellPolicy.isControl]). own — имя пакета приложения. */
     fun control(command: String, own: String, timeoutMs: Long = 15_000L): ShellResult {
         if (!ShellPolicy.isControl(command, own)) return ShellResult(false, "Команда не разрешена")
-        return exec(command, timeoutMs)
+        return exec(command, timeoutMs, strict = true)
     }
 
-    private fun exec(command: String, timeoutMs: Long): ShellResult {
+    /** strict — для команд управления: успех только при коде 0 и без сообщения об ошибке в выводе. */
+    private fun exec(command: String, timeoutMs: Long, strict: Boolean): ShellResult {
         return try {
             val method = Shizuku::class.java.getDeclaredMethod(
                 "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java
@@ -164,31 +173,42 @@ object ShizukuShell : ShellBackend {
             val argv = command.trim().split(Regex("\\s+")).toTypedArray()
             val process = method.invoke(null, argv, null, null) as Process
             val out = ByteArrayOutputStream()
-            val reader = Thread {
+            val err = ByteArrayOutputStream()
+            fun pump(stream: java.io.InputStream, sink: ByteArrayOutputStream) = Thread {
                 try {
                     val buffer = ByteArray(8192)
-                    process.inputStream.use { input ->
+                    stream.use { input ->
                         while (true) {
                             val n = input.read(buffer)
-                            if (n < 0 || out.size() >= MAX_OUTPUT) break
-                            out.write(buffer, 0, n)
+                            if (n < 0 || sink.size() >= MAX_OUTPUT) break
+                            sink.write(buffer, 0, n)
                         }
                     }
                 } catch (_: Exception) {}
-            }
-            reader.start()
+            }.also { it.start() }
+            val reader = pump(process.inputStream, out)
+            val errReader = pump(process.errorStream, err)
             // Вывод читается до конца потока (процесс закончился). waitFor(timeout) у удалённого процесса Shizuku
             // бросает «process hasn't exited», поэтому ждём чтением и сами опрашиваем exitValue().
             reader.join(timeoutMs)
             val timedOut = reader.isAlive
             if (timedOut) { try { process.destroy() } catch (_: Throwable) {}; reader.join(1000) }
+            errReader.join(1000)
             var exit: Int? = null
             val deadline = System.currentTimeMillis() + 2000L
             while (exit == null && System.currentTimeMillis() < deadline) {
                 try { exit = process.exitValue() } catch (_: IllegalThreadStateException) { Thread.sleep(50) }
             }
             val text = out.toString("UTF-8")
-            ShellResult(!timedOut && (exit == 0 || text.isNotBlank()), if (timedOut && text.isBlank()) "Команда не завершилась за ${timeoutMs / 1000} с" else text)
+            val errText = err.toString("UTF-8")
+            val combined = (text + (if (errText.isNotBlank()) "\n" + errText else "")).trim()
+            // Ошибка: ненулевой код выхода, а если код не узнали — сообщение об ошибке в выводе
+            val ok = !timedOut && if (strict) when (exit) {
+                0 -> !ShellPolicy.looksLikeError(combined)
+                null -> errText.isBlank() && !ShellPolicy.looksLikeError(text)
+                else -> false
+            } else (exit == 0 || text.isNotBlank())
+            ShellResult(ok, if (timedOut && combined.isBlank()) "Команда не завершилась за ${timeoutMs / 1000} с" else combined.ifBlank { if (exit != null) "код выхода $exit" else "" })
         } catch (e: Throwable) {
             ShellResult(false, e.message ?: e.javaClass.simpleName)
         }
