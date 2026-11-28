@@ -19,6 +19,7 @@ object ShizukuPower {
         add("android.permission.RECORD_AUDIO")
         add("android.permission.READ_CONTACTS")
         add("android.permission.CALL_PHONE")
+        add("android.permission.READ_PHONE_STATE")
         add("android.permission.READ_CALENDAR")
         add("android.permission.WRITE_CALENDAR")
         if (Build.VERSION.SDK_INT >= 33) {

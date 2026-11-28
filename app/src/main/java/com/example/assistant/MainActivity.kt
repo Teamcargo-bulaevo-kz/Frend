@@ -255,8 +255,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    companion object {
+        /** Чат на экране: «что на экране» тогда честно подсказывает, как спросить про другое приложение. */
+        @Volatile var visible = false
+    }
+
+    override fun onPause() {
+        visible = false
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        visible = true
         if (!::input.isInitialized) return
         val prefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
         findViewById<ImageButton>(R.id.attachButton).visibility =

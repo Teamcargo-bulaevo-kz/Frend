@@ -83,12 +83,19 @@ class AssistantAccessibilityService : AccessibilityService() {
             }
             clicked = true
             // Ждём, пока система переключится (Wi-Fi и Bluetooth включаются не мгновенно)
-            for (wait in 0 until 6) {
-                delay(500)
-                current = SystemState.isOn(this, key) ?: findTile(labels)?.let { tileState(it) }
+            var tileNow: Boolean? = null
+            for (wait in 0 until 8) {
+                delay(450)
+                val sys = SystemState.isOn(this, key)
+                tileNow = findTile(labels)?.let { tileState(it) }
+                // Если система ещё не обновилась, но плитка уже показывает нужное — считаем, что получилось
+                current = if (want != null && tileNow == want) want else sys ?: tileNow
                 if (want == null || current == want) break
             }
+            // Повторно нажимаем, только если и система, и сама плитка показывают старое состояние:
+            // иначе второе нажатие вернуло бы всё обратно (так и «не выключался» мобильный интернет)
             if (want == null || current == want || current == null) break
+            if (tileNow != null && tileNow != before) break
         }
         closeShade()
         return when {

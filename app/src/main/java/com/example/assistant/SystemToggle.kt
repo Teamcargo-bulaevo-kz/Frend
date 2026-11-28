@@ -92,7 +92,9 @@ object SystemToggle {
 
     /** Ждём, пока система переключится (Wi-Fi и Bluetooth включаются за 1–3 с). Неизвестное состояние считаем успехом. */
     private suspend fun waitFor(context: Context, key: String?, target: Boolean): Boolean {
-        for (i in 0 until 12) {
+        // Мобильный интернет и режим полёта на Xiaomi переключаются дольше (до 5–7 с)
+        val tries = if (key == "mobile_data" || key == "airplane") 20 else 12
+        for (i in 0 until tries) {
             val s = SystemState.isOn(context, key) ?: return true
             if (s == target) return true
             delay(350)

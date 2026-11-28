@@ -158,6 +158,7 @@ object FileOrganizer {
         return "Память: занято ${DeviceReport.bytes(st.totalBytes - st.freeBytes)} из ${DeviceReport.bytes(st.totalBytes)}, свободно ${DeviceReport.bytes(st.freeBytes)}.\n" +
             "Файлы по типам:\n$cats\nБольше всего в папках:\n$dirs" +
             (if (s.truncated) "\n(Посчитал не всё — файлов очень много.)" else "") +
+            "\nОстальное (~${DeviceReport.bytes(((st.totalBytes - st.freeBytes) - s.byCategory.values.sum()).coerceAtLeast(0))}) — приложения, их данные и сама система." +
             "\nПриложения и их данные сюда не входят: «какие приложения занимают место»." + DeviceVisuals.files(s.byCategory)
     }
 

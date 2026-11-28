@@ -42,6 +42,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Только чтобы точно знать, включён ли мобильный интернет (переключатели голосом) -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <!-- Напоминания в точное время и слово «Джарвис» -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />

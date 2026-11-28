@@ -318,17 +318,20 @@ class VisualView(context: Context, val visual: Visual, private val scaleText: Fl
                 c.drawText(t, rect.centerX() - tw / 2, rect.centerY() + dp(5f), bold)
             }
         }
+        // Подпись может занять две строки: высота строки легенды по факту, ничего не обрезается
+        var ly = top
         v.slices.forEachIndexed { i, (label, value) ->
-            val ly = top + rowH * i
             val pct = value / total * 100
-            val l = sl("$label — ${fmt(value)}${if (v.unit.isNotBlank()) " " + v.unit else ""} (${fmt(Math.round(pct).toDouble())}%)", small, legendW - dp(16f), maxLines = 1)
+            val l = sl("$label — ${fmt(value)}${if (v.unit.isNotBlank()) " " + v.unit else ""} (${fmt(Math.round(pct).toDouble())}%)", small, legendW - dp(16f), maxLines = 2)
+            val y0 = ly
             ops += { c ->
                 fill.color = palette[i % palette.size]
-                c.drawRoundRect(RectF(legendX, ly + dp(4f), legendX + dp(11f), ly + dp(15f)), dp(3f), dp(3f), fill)
-                drawLayout(c, l, legendX + dp(16f), ly + dp(2f))
+                c.drawRoundRect(RectF(legendX, y0 + dp(4f), legendX + dp(11f), y0 + dp(15f)), dp(3f), dp(3f), fill)
+                drawLayout(c, l, legendX + dp(16f), y0 + dp(2f))
             }
+            ly += max(rowH, l.height + dp(8f))
         }
-        return top + max(diam, rowH * v.slices.size)
+        return max(top + diam, ly)
     }
 
     private fun table(v: Visual.Table, y0: Float, inner: Float): Float {

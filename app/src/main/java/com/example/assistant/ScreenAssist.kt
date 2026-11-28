@@ -39,6 +39,9 @@ object ScreenAssist {
     private fun needService() =
         "Нужна служба специальных возможностей: Настройки → Специальные возможности → Assistant (или «Выдать все разрешения через Shizuku» в настройках)."
 
+    /** «Пятница, что тут написано» → «что тут написано»: слово активации модели не нужно. */
+    fun cleanQuestion(q: String): String = (WakeWord.commandAfter(q) ?: q).trim()
+
     /** Слова, по которым понятно, что вопрос про то, что сейчас на экране. */
     private val deixis = listOf(
         "экран", "тут", "здесь", "это", "этот", "эта", "эту", "эти", "этом", "этой", "вижу", "видишь", "написано", "открыто",
@@ -60,15 +63,25 @@ object ScreenAssist {
         if (!Privacy.screenAllowed(context)) {
             return "Смотреть на экран сейчас запрещено. Скажи «включи живой экран» или включи «Чтение экрана» в меню «Что ассистент может видеть»."
         }
-        val image = withContext(Dispatchers.Main) { service.screenshotJpeg() }
-        val q = question.ifBlank { "Что на экране? Коротко объясни и подскажи, чем могу помочь." }
+        // Открыт сам чат ассистента — смотреть не на что; подсказываем, как спросить про нужное приложение
+        if (MainActivity.visible && !ScreenOverlay.bubbleEnabled(context)) {
+            return "Сейчас на экране наш чат. Открой нужное приложение и скажи «Пятница, что на экране» — или включи «Живой экран» и нажми «?» у края экрана."
+        }
+        if (MainActivity.visible) return "Сейчас на экране наш чат. Открой нужное приложение и нажми «?» у края экрана — я посмотрю на него."
+        // Снимок поменьше (быстрее уходит и обрабатывается) + точный текст окна: модель не путает мелкие надписи
+        val image = withContext(Dispatchers.Main) { service.screenshotJpeg(1024) }
+        val windowText = withContext(Dispatchers.Main) { service.readScreen(1500) }.orEmpty()
+        val q = cleanQuestion(question).ifBlank { "Что на экране? Коротко объясни и подскажи, чем могу помочь." }
         return try {
             if (image != null) {
                 client(context).vision(image,
                     "Ты голосовой ассистент в телефоне пользователя, перед тобой снимок его экрана. Вопрос: «$q». " +
+                        "Вопрос задан голосом — слова могли распознаться с ошибками, понимай по смыслу. " +
                         "Ответь по-русски коротко (1–4 предложения), опираясь только на то, что видно. Если просят что-то сделать " +
                         "в приложении, скажи, что нажать. Если просят ответить на сообщение — предложи готовый текст ответа. " +
-                        "Не пересказывай весь экран без просьбы. Пароли и номера карт не повторяй.")
+                        "Не пересказывай весь экран без просьбы. Пароли и номера карт не повторяй." +
+                        if (windowText.isNotBlank()) "\nТочный текст с экрана (для справки):\n$windowText" else "",
+                    maxTokens = 600)
             } else {
                 val text = withContext(Dispatchers.Main) { service.readScreen(4000) } ?: return "Не получилось увидеть экран: окно не отдаёт содержимое" +
                     if (Build.VERSION.SDK_INT >= 30) ", а снимок не получился (перевключи службу специальных возможностей)." else "."
@@ -123,11 +136,56 @@ object ScreenAssist {
 
     // ---------------------------------------------------------------- кнопки у края экрана
 
-    /** «?»: начинаем разговор голосом; ответы идут со снимком экрана, пока включён «Живой экран». */
+    /**
+     * «?»: спросить про экран голосом. Слушаем точным распознаванием телефона (как кнопка микрофона в чате),
+     * а не фоновым словом активации — вопросы длинные, ошибок меньше. Ответ — карточкой и голосом.
+     */
     fun askByVoice(context: Context) {
-        if (!live(context)) context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_LIVE, true).apply()
         Speaker.stop()
-        WakeWordService.startDialog(context)
+        Privacy.setScreenAllowed(context, true)
+        val app = context.applicationContext
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(app)) {
+            WakeWordService.startDialog(app); return
+        }
+        // Микрофон отдаём системному распознаванию
+        WakeWordService.pauseForSystemVoiceInput(app)
+        ScreenOverlay.showCard("Спроси про экран", "Слушаю… Например: «что тут написано», «что нажать», «помоги ответить».", 12_000L)
+        Cues.play(app, Cues.Kind.LISTEN, mute = false)
+        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(app)
+        fun finish() { try { recognizer.destroy() } catch (_: Exception) {}; WakeWordService.start(app) }
+        recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onResults(results: android.os.Bundle?) {
+                val text = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                finish()
+                if (text.isBlank()) { ScreenOverlay.showCard("Спроси про экран", "Не расслышал. Нажми «?» и спроси ещё раз.", 5_000L); return }
+                Cues.play(app, Cues.Kind.ACCEPT)
+                ScreenOverlay.showCard("«$text»", "Смотрю на экран…", 30_000L)
+                scope.launch {
+                    val answer = ask(app, text)
+                    ScreenOverlay.showCard("«$text»", answer)
+                    Speaker.speak(app, answer)
+                    ChatHistory.append(app, "user", text); ChatHistory.append(app, "assistant", answer)
+                    ChatHistory.onChanged?.invoke()
+                }
+            }
+            override fun onError(error: Int) {
+                finish()
+                Cues.play(app, Cues.Kind.ERROR)
+                ScreenOverlay.showCard("Спроси про экран", if (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH || error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                    "Не расслышал. Нажми «?» и спроси ещё раз." else "Распознавание речи недоступно (код $error).", 6_000L)
+            }
+            override fun onReadyForSpeech(params: android.os.Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: android.os.Bundle?) {}
+            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+        })
+        // Небольшая пауза: фоновый микрофон успевает освободиться
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try { recognizer.startListening(VoiceInput.intent(context = app)) } catch (e: Exception) { finish() }
+        }, 350L)
     }
 
     /** «Aあ»: переводим экран на русский. */

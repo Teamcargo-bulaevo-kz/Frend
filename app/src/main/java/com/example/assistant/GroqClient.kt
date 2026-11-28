@@ -129,10 +129,11 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
     }
 
     /** Модели Groq, которые понимают картинки. Если первая недоступна, пробуем следующую. */
-    private val visionModels = listOf("qwen/qwen3.8-27b", "meta-llama/llama-4-scout-17b-16e-instruct")
+    // Быстрая модель первой: «что на экране» отвечает за 2–4 с; если она недоступна — запасная
+    private val visionModels = listOf("meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct", "qwen/qwen3.8-27b")
 
     /** Распознаёт картинку (JPEG в base64) по заданию, например «перепиши весь текст». */
-    suspend fun vision(imageBase64: String, task: String): String = withContext(Dispatchers.IO) {
+    suspend fun vision(imageBase64: String, task: String, maxTokens: Int = 3000): String = withContext(Dispatchers.IO) {
         var last: Exception? = null
         for (visionModel in visionModels) {
             try {
@@ -144,7 +145,7 @@ class GroqClient(private val apiKey: String, private val appContext: android.con
                     put("model", visionModel)
                     put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
                     put("temperature", 0)
-                    put("max_completion_tokens", 3000)
+                    put("max_completion_tokens", maxTokens)
                 }
                 val message = execute(body).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
                 val text = message?.optString("content", "").orEmpty().trim()

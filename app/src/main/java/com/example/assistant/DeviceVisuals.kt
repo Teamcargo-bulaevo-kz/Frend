@@ -14,14 +14,15 @@ object DeviceVisuals {
 
     fun memory(m: MemoryInfoData): Visual.Stat {
         val used = m.totalBytes - m.availBytes
-        val p = if (m.totalBytes > 0) used * 100.0 / m.totalBytes else 0.0
-        return Visual.Stat("Оперативная память", "${Math.round(p)}%", "свободно ${DeviceReport.bytes(m.availBytes)}", if (p > 85) "red" else if (p > 70) "yellow" else "blue", p)
+        val p = if (m.totalBytes > 0) (used * 100 / m.totalBytes).toDouble() else 0.0
+        return Visual.Stat("Оперативная память", "${p.toInt()}%", "свободно ${DeviceReport.bytes(m.availBytes)}", if (p > 85) "red" else if (p > 70) "yellow" else "blue", p)
     }
 
     fun storage(s: StorageInfoData): Visual.Stat {
         val used = s.totalBytes - s.freeBytes
-        val p = if (s.totalBytes > 0) used * 100.0 / s.totalBytes else 0.0
-        return Visual.Stat("Память телефона", "${Math.round(p)}%", "свободно ${DeviceReport.bytes(s.freeBytes)}", if (p > 90) "red" else if (p > 75) "yellow" else "violet", p)
+        // Так же, как в тексте ответа (целая часть), чтобы цифры не расходились: 96% и 96%, а не 96% и 97%
+        val p = if (s.totalBytes > 0) (used * 100 / s.totalBytes).toDouble() else 0.0
+        return Visual.Stat("Память телефона", "${p.toInt()}%", "свободно ${DeviceReport.bytes(s.freeBytes)}", if (p > 90) "red" else if (p > 75) "yellow" else "violet", p)
     }
 
     fun network(n: NetworkInfo): Visual.Stat = Visual.Stat(

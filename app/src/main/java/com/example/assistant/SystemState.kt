@@ -41,6 +41,14 @@ object SystemState {
 
     /** Мобильный интернет: системная настройка mobile_data (общая или для основной SIM). */
     private fun mobileData(app: Context): Boolean? {
+        // Самый точный источник — система связи (на Xiaomi настройка mobile_data бывает устаревшей)
+        try {
+            val tm = app.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+            val sub = android.telephony.SubscriptionManager.getDefaultDataSubscriptionId()
+            val forSub = if (sub >= 0) tm?.createForSubscriptionId(sub) else tm
+            forSub?.isDataEnabled?.let { return it }
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {}
         val r = app.contentResolver
         val sub = try { android.telephony.SubscriptionManager.getDefaultDataSubscriptionId() } catch (e: Exception) { -1 }
         val perSim = if (sub >= 0) try { Settings.Global.getInt(r, "mobile_data$sub") } catch (e: Exception) { null } else null
