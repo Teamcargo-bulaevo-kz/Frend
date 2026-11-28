@@ -273,7 +273,7 @@ class SettingsActivity : AppCompatActivity() {
         addAction("Обучить понималку сейчас", "Groq придумает разговорные варианты команд — потом они понимаются без интернета. Само — раз в 5 дней") {
             Toast.makeText(this, "Обучаю… это займёт до минуты", Toast.LENGTH_SHORT).show()
             Thread {
-                val r = try { kotlinx.coroutines.runBlocking { OfflineBrain.train(this, GroqClient(BuildConfig.GROQ_API_KEY, applicationContext)) } } catch (e: Exception) { "Ошибка: ${e.message}" }
+                val r = try { kotlinx.coroutines.runBlocking { OfflineBrain.train(this@SettingsActivity, GroqClient(BuildConfig.GROQ_API_KEY, applicationContext)) } } catch (e: Exception) { "Ошибка: ${e.message}" }
                 runOnUiThread { androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Понималка").setMessage(r).setPositiveButton("Ок", null).show() }
             }.start()
         }
