@@ -87,7 +87,13 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
         }
         asks.clear()
-        val raw = handleInner(prompt, fromVoice)
+        AutoSend.takeRequest()
+        var raw = handleInner(prompt, fromVoice)
+        // Чат мессенджера открыт с готовым текстом и автоотправка включена — нажимаем «Отправить» сами
+        if (AutoSend.takeRequest()) {
+            raw = if (AutoSend.press()) raw.replace(Regex("\\s*Нажми «Отправить»\\.?"), "").trimEnd('.', ' ') + ". Отправил ✓"
+            else "$raw\nСам нажать «Отправить» не получилось — нажми сам (нужна служба специальных возможностей Assistant)."
+        }
         // Список с цифрами без картинки — дорисовываем столбцы (процессы, приложения, файлы…)
         val answer = raw + AutoVisual.forText(raw)
         if (asks.isNotEmpty()) {
@@ -99,6 +105,14 @@ class AssistantRepository(private val context: Context, apiKey: String) {
 
     private suspend fun handleInner(prompt: String, fromVoice: Boolean): String {
         val normalized = normalize(prompt)
+
+        // «Через 5 минут напиши Максиму…», «в 23:00 выключи Wi-Fi»: откладываем команду, а не выполняем сейчас
+        if (AppSettings.featureOn(context, "schedule_command")) {
+            ScheduledCommands.manage(prompt)?.let { (action, query) ->
+                return if (action == "cancel") ScheduledCommands.cancel(context, query) else ScheduledCommands.list(context)
+            }
+            ScheduledCommands.parse(prompt)?.let { return ScheduledCommands.add(context, it.command, it.at, it.daily) }
+        }
 
         // Уровень 1: правила
         LocalCommands.parse(prompt)?.let { command ->
@@ -287,7 +301,10 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 put("role", "system")
                 put("content", client.systemPrompt())
             })
-            if (!commandMode || AssistantPrompt.wantsVisual(prompt)) put(JSONObject().put("role", "system").put("content", AssistantPrompt.VISUAL_NOTE))
+            if ((!commandMode || AssistantPrompt.wantsVisual(prompt)) && PromptStore.builtInEnabled(context, PromptStore.VISUAL)) put(JSONObject().put("role", "system").put("content", AssistantPrompt.VISUAL_NOTE))
+            if (AssistantPrompt.wantsBoard(prompt) && PromptStore.builtInEnabled(context, PromptStore.BOARD)) put(JSONObject().put("role", "system").put("content", AssistantPrompt.BOARD_NOTE))
+            // Свои указания пользователя и включённые навыки-инструкции из «Промпт и навыки»
+            PromptStore.systemAddition(context, prompt)?.let { put(JSONObject().put("role", "system").put("content", it)) }
             // Личная база знаний: подходящие записи подсказываем модели (номера, коды, справки пользователя)
             try {
                 val hits = OfflineBrain.search(context, prompt, 3).filter { it.score >= 2.0 }
@@ -303,7 +320,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             val shown = history.takeLast(window)
             for ((i, m) in shown.withIndex()) {
                 // Пометку «голосом» ставим прямо перед самим запросом: последним остаётся сообщение пользователя
-                if (fromVoice && i == shown.lastIndex && m.role != "assistant") {
+                if (fromVoice && i == shown.lastIndex && m.role != "assistant" && PromptStore.builtInEnabled(context, PromptStore.VOICE)) {
                     put(JSONObject().apply {
                         put("role", "system")
                         put("content", AssistantPrompt.VOICE_NOTE)
@@ -317,7 +334,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
         }
         val multi = AgentPlan.multiStep(prompt)
-        if (multi && messages.length() > 1) {
+        if (multi && messages.length() > 1 && PromptStore.builtInEnabled(context, PromptStore.PLAN)) {
             // Подсказка про план — системным сообщением перед последней репликой пользователя
             val last = messages.getJSONObject(messages.length() - 1)
             messages.put(messages.length() - 1, JSONObject().put("role", "system").put("content", AgentPlan.NOTE))
@@ -673,6 +690,9 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 context, a.optString("text", ""), a.optIntOrNull("in_minutes"), a.optStringOrNull("date"), a.optStringOrNull("time")
             )
             "list_reminders" -> ReminderActions.list(context)
+            "schedule_command" -> ScheduledCommands.schedule(context, a.optString("command"),
+                if (a.has("in_minutes")) a.optDouble("in_minutes") else null, a.optStringOrNull("time"), a.optStringOrNull("date"), a.optBoolean("daily"))
+            "scheduled_commands" -> if (a.optString("action") == "cancel") ScheduledCommands.cancel(context, a.optStringOrNull("query")) else ScheduledCommands.list(context)
             "cancel_reminder" -> ReminderActions.cancel(context, a.optStringOrNull("query"), confirmed)
             "calendar_add" -> withContext(Dispatchers.IO) {
                 CalendarActions.add(

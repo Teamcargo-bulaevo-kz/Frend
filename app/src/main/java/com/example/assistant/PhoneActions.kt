@@ -319,6 +319,7 @@ object PhoneActions {
             for (pkg in WHATSAPP_PACKAGES) {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(pkg)
                 if (launch(context, intent)) {
+                    if (text.isNotEmpty() && AutoSend.wanted(context)) AutoSend.request()
                     return if (text.isNotEmpty()) {
                         "Открыл чат WhatsApp с +$digits, текст подставил. Нажми «Отправить»"
                     } else {

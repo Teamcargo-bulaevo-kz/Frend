@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 
 @Dao
 interface NoteDao {
@@ -19,4 +20,8 @@ interface NoteDao {
 
     @Delete
     suspend fun delete(note: NoteEntity)
+
+    /** Правка текста заметки (схема таблицы не меняется). */
+    @Update
+    suspend fun update(note: NoteEntity)
 }

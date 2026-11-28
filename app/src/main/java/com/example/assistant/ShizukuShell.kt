@@ -61,7 +61,8 @@ object ShellPolicy {
             Regex("""appops set $pkg [A-Z_]+ (allow|deny|default|ignore)"""),
             Regex("""am force-stop (?!android$|com\.android\.systemui$|$pkg$|com\.android\.phone$)[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+"""),
             Regex("""am broadcast -a android\.intent\.action\.AIRPLANE_MODE --ez state (true|false)"""),
-            Regex("""input keyevent \d{1,3}""")
+            Regex("""input keyevent \d{1,3}"""),
+            Regex("""wm dismiss-keyguard""")
         )
         return control.any { it.matches(c) }
     }

@@ -371,6 +371,32 @@ class AssistantAccessibilityService : AccessibilityService() {
     }
 
     /** Пакет открытого приложения (для «Живого экрана» и переводчика). */
+    /**
+     * Нажимает «Отправить» в открытом чате мессенджера (WhatsApp, WhatsApp Business, Telegram):
+     * сначала по идентификатору кнопки, потом по подписи. true — нажал.
+     */
+    fun pressSend(): Boolean {
+        val ids = listOf("com.whatsapp:id/send", "com.whatsapp.w4b:id/send", "org.telegram.messenger:id/chat_send_button")
+        for (root in roots()) {
+            for (id in ids) {
+                val found = try { root.findAccessibilityNodeInfosByViewId(id) } catch (_: Exception) { null }
+                found?.firstOrNull { it.isVisibleToUser }?.let { if (clickNode(it) || tapCenter(it)) return true }
+            }
+        }
+        val labels = listOf("отправить", "send")
+        for (root in roots()) {
+            val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+            var seen = 0
+            while (stack.isNotEmpty() && seen++ < 600) {
+                val n = stack.removeFirst()
+                val d = n.contentDescription?.toString()?.trim()?.lowercase().orEmpty()
+                if (d in labels && n.isVisibleToUser) { if (clickNode(n) || tapCenter(n)) return true }
+                for (i in 0 until n.childCount) n.getChild(i)?.let(stack::add)
+            }
+        }
+        return false
+    }
+
     fun currentPackage(): String = rootInActiveWindow?.packageName?.toString().orEmpty()
 
     /** Снимок экрана в JPEG base64 (Android 11+). null — нельзя: старый Android или служба включена до обновления. */

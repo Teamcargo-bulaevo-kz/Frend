@@ -81,6 +81,17 @@ object OfflineBrain {
 
     fun addFact(context: Context, title: String, body: String, source: String = "пользователь"): Long = insert(db(context), title, body, "", source)
 
+    fun updateFact(context: Context, id: Long, title: String, body: String): Boolean =
+        db(context).update("facts", android.content.ContentValues().apply { put("title", title); put("body", body) }, "id = ?", arrayOf(id.toString())) > 0
+
+    /** Удаляет навык (файл в папке Навыки). Встроенный навык после удаления не возвращается. */
+    fun deleteSkill(context: Context, name: String): Boolean {
+        val f = java.io.File(skillsDir(context), Skill.fileName(name))
+        val ok = f.exists() && f.delete()
+        skillCache = null; model = null
+        return ok
+    }
+
     fun deleteFacts(context: Context, ids: List<Long>): Int = ids.sumOf { db(context).delete("facts", "id = ?", arrayOf(it.toString())) }
 
     fun search(context: Context, query: String, limit: Int = 5) = KnowledgeRank.search(query, facts(context), limit)

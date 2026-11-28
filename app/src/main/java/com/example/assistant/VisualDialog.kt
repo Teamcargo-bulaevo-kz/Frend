@@ -16,6 +16,7 @@ import java.io.File
 object VisualDialog {
 
     fun show(context: Context, visual: Visual) {
+        if (visual is Visual.Drawing && visual.steps > 0) { BoardDialog.show(context, visual); return }
         val view = VisualView(context, visual, 1.12f)
         val scroll = ScrollView(context).apply { setPadding(24, 24, 24, 24); addView(view) }
         AlertDialog.Builder(context)

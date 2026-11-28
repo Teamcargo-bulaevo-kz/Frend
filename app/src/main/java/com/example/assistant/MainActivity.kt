@@ -110,6 +110,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         repository = AssistantRepository(applicationContext, BuildConfig.GROQ_API_KEY)
+        ScheduledCommands.rescheduleAll(applicationContext)
 
         requestMediaPermissionIfNeeded()
         if (getSharedPreferences("assistant_prefs", MODE_PRIVATE).getBoolean("quick_access_enabled", true)) {
@@ -216,6 +217,11 @@ class MainActivity : AppCompatActivity() {
             drawer.openDrawer(android.view.Gravity.START)
         }
         findViewById<ImageButton>(R.id.newChatButton).setOnClickListener { startNewChat() }
+        findViewById<ImageButton>(R.id.hubButton).setOnClickListener { startActivity(Intent(this, HubActivity::class.java)) }
+        findViewById<TextView>(R.id.hubDrawer).setOnClickListener {
+            drawer.closeDrawers()
+            startActivity(Intent(this, HubActivity::class.java))
+        }
         findViewById<Button>(R.id.newChatDrawerButton).setOnClickListener { startNewChat() }
 
         chatsListView.setOnItemClickListener { _, _, position, _ ->
@@ -258,6 +264,35 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** Чат на экране: «что на экране» тогда честно подсказывает, как спросить про другое приложение. */
         @Volatile var visible = false
+        /** Из уведомления «Пора: …» — выполнить запланированное, ждавшее разблокировки. */
+        const val EXTRA_RUN_WAITING = "run_waiting"
+        /** Из меню: вставить текст в поле ввода (например «Объясни на доске: »). */
+        const val EXTRA_PREFILL = "prefill"
+        /** Из меню, заметок и навыков: сразу выполнить команду. */
+        const val EXTRA_RUN = "run_command"
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
+    /** Действия, пришедшие из уведомлений и меню. */
+    private fun handleExtras(intent: Intent?) {
+        intent ?: return
+        if (intent.getBooleanExtra(EXTRA_RUN_WAITING, false)) {
+            intent.removeExtra(EXTRA_RUN_WAITING)
+            ScheduledCommands.runWaiting(applicationContext)
+        }
+        intent.getStringExtra(EXTRA_PREFILL)?.let { text ->
+            intent.removeExtra(EXTRA_PREFILL)
+            if (::input.isInitialized) { input.setText(text); input.setSelection(text.length); input.requestFocus()
+                (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(input, 0) }
+        }
+        intent.getStringExtra(EXTRA_RUN)?.let { cmd ->
+            intent.removeExtra(EXTRA_RUN)
+            if (::input.isInitialized && cmd.isNotBlank()) input.post { sendPrompt(cmd) }
+        }
     }
 
     override fun onPause() {
@@ -269,6 +304,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         visible = true
         buildQuickBar()
+        handleExtras(intent)
         if (!::input.isInitialized) return
         val prefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
         findViewById<ImageButton>(R.id.attachButton).visibility =
@@ -564,9 +600,15 @@ class MainActivity : AppCompatActivity() {
             }
             ChatHistory.append(applicationContext, "assistant", answer, chatId)
             // Спросили голосом — отвечаем голосом, даже если озвучка текстовых ответов выключена
-            if (fromVoice || Speaker.enabled(applicationContext)) Speaker.speak(applicationContext, answer)
+            // Объяснение на доске по шагам сразу открываем окном: доска сама озвучивает шаги
+            val board = VisualSpec.firstBoard(answer)
+            if (board == null && (fromVoice || Speaker.enabled(applicationContext))) Speaker.speak(applicationContext, answer)
             adapter.add(ChatMessage("assistant", answer, System.currentTimeMillis()))
             scrollToEnd()
+            if (board != null && !isFinishing) {
+                if (fromVoice && !Speaker.enabled(applicationContext)) getSharedPreferences("assistant_prefs", MODE_PRIVATE).edit().putBoolean("board_voice", true).apply()
+                try { BoardDialog.show(this@MainActivity, board) } catch (_: Exception) {}
+            }
             busy = false
             setControlsEnabled(true)
         }

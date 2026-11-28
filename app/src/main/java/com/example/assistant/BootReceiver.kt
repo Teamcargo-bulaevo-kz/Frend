@@ -13,6 +13,7 @@ class BootReceiver : BroadcastReceiver() {
             }
             ReminderActions.rescheduleAll(context)
             DigestActions.rescheduleAll(context)
+            ScheduledCommands.rescheduleAll(context)
         }
     }
 }

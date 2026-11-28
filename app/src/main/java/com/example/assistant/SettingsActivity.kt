@@ -29,7 +29,11 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private val prefs by lazy { getSharedPreferences("assistant_prefs", MODE_PRIVATE) }
+    /** Тело текущего раздела: в него добавляются карточки настроек. */
     private lateinit var content: LinearLayout
+    /** Весь список разделов на экране. */
+    private lateinit var root: LinearLayout
+    private val openSections by lazy { prefs.getStringSet("settings_open", emptySet())!!.toMutableSet() }
     private var fontChanged = false
 
     override fun onStop() {
@@ -85,11 +89,12 @@ class SettingsActivity : AppCompatActivity() {
         root.addView(header)
 
         val scroll = android.widget.ScrollView(this).apply { clipToPadding = false }
-        content = LinearLayout(this).apply {
+        root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(4), dp(16), dp(28))
         }
-        scroll.addView(content)
+        content = root
+        scroll.addView(root)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
 
@@ -118,80 +123,21 @@ class SettingsActivity : AppCompatActivity() {
             prefs.edit().putBoolean("suggestions_enabled", it).apply()
         }
 
-        section("Функции команд", "Каждую возможность можно отключить отдельно. Выключенные функции не выполняются даже по голосовой команде.")
-        val featureGroups = listOf(
-            "Телефон и приложения" to listOf(
-                "set_alarm" to "Будильники",
-                "flashlight" to "Фонарик",
-                "open_camera" to "Открытие камеры",
-                "take_screenshot" to "Скриншоты",
-                "open_app" to "Открытие приложений",
-                "open_browser" to "Браузер и поиск сайтов",
-                "open_settings" to "Системные настройки",
-                "open_dialer" to "Телефон и набор номера",
-                "open_whatsapp" to "WhatsApp"
-            ),
-            "Музыка" to listOf(
-                "play_music" to "Воспроизведение музыки",
-                "music_wave" to "Моя волна, похожие и подборки",
-                "music_control" to "Управление плеером",
-                "music_rate" to "Подбор музыки по настроению",
-                "music_tags" to "Теги музыкальных файлов",
-                "music_library" to "Поиск в музыкальной библиотеке",
-                "playlist" to "Создание и изменение плейлистов",
-                "set_volume" to "Громкость телефона/медиа"
-            ),
-            "Файлы и контакты" to listOf(
-                "find_media" to "Поиск фото и видео",
-                "find_files" to "Поиск файлов",
-                "shared_folder" to "Общая папка и работа с файлами",
-                "call_contact" to "Звонки контактам",
-                "message_contact" to "Сообщения контактам",
-                "find_contact" to "Поиск контактов"
-            ),
-            "Система и интернет" to listOf(
-                "device_info" to "Состояние телефона",
-                "read_screen" to "Чтение экрана",
-                "kb" to "База знаний",
-                "skills" to "Навыки",
-                "screen_control" to "Управление экраном (назад, нажать, листать, ввести)",
-                "screen_translate" to "Переводчик на экране",
-                "live_screen" to "Живой экран",
-                "files" to "Порядок в файлах (без удаления)",
-                "notifications" to "Чтение уведомлений",
-                "close_app" to "Закрытие приложений (Shizuku)",
-                "grant_permissions" to "Выдача разрешений через Shizuku",
-                "set_brightness" to "Яркость экрана",
-                "quick_setting" to "Быстрые настройки телефона",
-                "web_search" to "Поиск информации в интернете"
-            ),
-            "Планирование и заметки" to listOf(
-                "set_timer" to "Таймеры",
-                "set_reminder" to "Напоминания",
-                "list_reminders" to "Просмотр напоминаний",
-                "cancel_reminder" to "Отмена напоминаний",
-                "calendar_add" to "Создание событий календаря",
-                "calendar_list" to "Просмотр календаря",
-                "create_note" to "Создание заметок",
-                "list_notes" to "Просмотр заметок",
-                "search_notes" to "Поиск заметок",
-                "delete_note" to "Удаление заметок"
-            ),
-            "Профиль и сводки" to listOf(
-                "set_profile" to "Сохранение данных профиля",
-                "schedule_digest" to "Запланированные сводки",
-                "list_digests" to "Просмотр сводок",
-                "cancel_digest" to "Отмена сводок"
-            )
-        )
-        featureGroups.forEach { (groupTitle, features) ->
-            section(groupTitle, "Переключатель влияет только на эту функцию")
-            features.forEach { (key, label) ->
-                addSwitch(label, "Разрешить ассистенту использовать эту команду.", prefs.getBoolean("feature_$key", true)) { enabled ->
-                    prefs.edit().putBoolean("feature_$key", enabled).apply()
-                }
-            }
+        section("Планировщик и сообщения", "«Через 5 минут напиши Максиму в WhatsApp доброе утро», «в 23:00 выключи Wi-Fi», «каждый день в 7:30 включи мою волну». В назначенное время команда выполняется сама. Сообщение отправляет служба специальных возможностей: она нажимает «Отправить». Если телефон заблокирован паролем, команда ждёт разблокировки.")
+        addSwitch("Отправлять запланированные сообщения сами", "Чат мессенджера откроется с текстом, и «Отправить» нажмётся автоматически.", Prefs.autoSendScheduled(this)) { Prefs.setAutoSendScheduled(this, it) }
+        addSwitch("Отправлять и обычные «напиши …» сразу", "Без запланированного времени: ассистент сам нажмёт «Отправить». Выключено — текст подставляется, отправляешь ты.", Prefs.autoSendAlways(this)) { Prefs.setAutoSendAlways(this, it) }
+        addAction("Запланированное", "Список, отмена и добавление") { startActivity(Intent(this, HubActivity::class.java).putExtra(HubActivity.EXTRA_SCHEDULED, true)) }
+
+        section("Память, промпт и навыки", "Заметки, база знаний, свои указания модели, режимы, навыки и выученные фразы — каждое в своём экране.")
+        addAction("Заметки и память", "Записи ассистента и твои: поиск, правка, удаление") { startActivity(Intent(this, NotesActivity::class.java)) }
+        addAction("Промпт и навыки", "Мои указания, встроенные инструкции, режимы, навыки, выученное") { startActivity(Intent(this, PromptSkillsActivity::class.java)) }
+        addAction("Проводник", "Файлы телефона, папка Assistant и внутренние данные — только просмотр") { startActivity(Intent(this, ExplorerActivity::class.java)) }
+
+        section("Доска и чертёж", "Объяснения мелом на чёрной доске и технические чертежи. Шаги дорисовываются по очереди, пояснение звучит голосом.")
+        addSwitch("Озвучивать шаги доски", "Каждый шаг объяснения проговаривается; дальше — когда договорит.", prefs.getBoolean("board_voice", Speaker.enabled(this))) {
+            prefs.edit().putBoolean("board_voice", it).apply()
         }
+        addSwitch("Инструкция «Доска и чертёж» для модели", "Выключи, если не нужны рисунки по шагам.", PromptStore.builtInEnabled(this, PromptStore.BOARD)) { PromptStore.setBuiltIn(this, PromptStore.BOARD, it) }
 
         section("Звуковые сигналы", "Высокий «пик» — слушаю, говори. Двойной — команда принята. Тихий щелчок — думаю дольше обычного. Низкий мягкий — перестал слушать. Низкий двойной — не получилось.")
         addAction("Прослушать сигналы", "По очереди: слушаю → принял → думаю → перестал слушать → ошибка") {
@@ -315,6 +261,82 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, if (AssistantAccessibilityService.instance == null) "Сначала включи службу специальных возможностей «Assistant»" else "Открой нужное приложение и нажми «Aあ»", Toast.LENGTH_LONG).show()
         }
 
+        section("Функции команд", "Каждую возможность можно отключить отдельно. Выключенные функции не выполняются даже по голосовой команде.")
+        val featureGroups = listOf(
+            "Телефон и приложения" to listOf(
+                "set_alarm" to "Будильники",
+                "flashlight" to "Фонарик",
+                "open_camera" to "Открытие камеры",
+                "take_screenshot" to "Скриншоты",
+                "open_app" to "Открытие приложений",
+                "open_browser" to "Браузер и поиск сайтов",
+                "open_settings" to "Системные настройки",
+                "open_dialer" to "Телефон и набор номера",
+                "open_whatsapp" to "WhatsApp"
+            ),
+            "Музыка" to listOf(
+                "play_music" to "Воспроизведение музыки",
+                "music_wave" to "Моя волна, похожие и подборки",
+                "music_control" to "Управление плеером",
+                "music_rate" to "Подбор музыки по настроению",
+                "music_tags" to "Теги музыкальных файлов",
+                "music_library" to "Поиск в музыкальной библиотеке",
+                "playlist" to "Создание и изменение плейлистов",
+                "set_volume" to "Громкость телефона/медиа"
+            ),
+            "Файлы и контакты" to listOf(
+                "find_media" to "Поиск фото и видео",
+                "find_files" to "Поиск файлов",
+                "shared_folder" to "Общая папка и работа с файлами",
+                "call_contact" to "Звонки контактам",
+                "message_contact" to "Сообщения контактам",
+                "find_contact" to "Поиск контактов"
+            ),
+            "Система и интернет" to listOf(
+                "device_info" to "Состояние телефона",
+                "read_screen" to "Чтение экрана",
+                "kb" to "База знаний",
+                "skills" to "Навыки",
+                "screen_control" to "Управление экраном (назад, нажать, листать, ввести)",
+                "screen_translate" to "Переводчик на экране",
+                "live_screen" to "Живой экран",
+                "files" to "Порядок в файлах (без удаления)",
+                "notifications" to "Чтение уведомлений",
+                "close_app" to "Закрытие приложений (Shizuku)",
+                "grant_permissions" to "Выдача разрешений через Shizuku",
+                "set_brightness" to "Яркость экрана",
+                "quick_setting" to "Быстрые настройки телефона",
+                "web_search" to "Поиск информации в интернете"
+            ),
+            "Планирование и заметки" to listOf(
+                "set_timer" to "Таймеры",
+                "set_reminder" to "Напоминания",
+                "list_reminders" to "Просмотр напоминаний",
+                "cancel_reminder" to "Отмена напоминаний",
+                "schedule_command" to "Запланированные действия («через 5 минут напиши…»)",
+                "calendar_add" to "Создание событий календаря",
+                "calendar_list" to "Просмотр календаря",
+                "create_note" to "Создание заметок",
+                "list_notes" to "Просмотр заметок",
+                "search_notes" to "Поиск заметок",
+                "delete_note" to "Удаление заметок"
+            ),
+            "Профиль и сводки" to listOf(
+                "set_profile" to "Сохранение данных профиля",
+                "schedule_digest" to "Запланированные сводки",
+                "list_digests" to "Просмотр сводок",
+                "cancel_digest" to "Отмена сводок"
+            )
+        )
+        featureGroups.forEach { (groupTitle, features) ->
+            subsection(groupTitle)
+            features.forEach { (key, label) ->
+                addSwitch(label, "Разрешить ассистенту использовать эту команду.", prefs.getBoolean("feature_$key", true)) { enabled ->
+                    prefs.edit().putBoolean("feature_$key", enabled).apply()
+                }
+            }
+        }
+
         section("Внешний вид", "Изменения сохраняются на устройстве")
         addChoice("Тема приложения", arrayOf("Как в системе", "Светлая", "Тёмная"), prefs.getString("app_theme", "system") ?: "system",
             arrayOf("system", "light", "dark")) { selected ->
@@ -332,7 +354,7 @@ class SettingsActivity : AppCompatActivity() {
             fontChanged = true
         }
 
-        section("Дополнительно", "Настройки слова активации и голоса")
+        section("Голос и слово активации", "Слово активации, голос и скорость озвучки, проверка распознавания")
         addAction("Слово активации и батарея", "Изменить ключевую фразу и открыть настройки энергосбережения") {
             showWakePhraseDialog()
         }
@@ -415,7 +437,7 @@ class SettingsActivity : AppCompatActivity() {
             setTextColor(ContextCompat.getColor(context, R.color.chat_text_dim))
             setPadding(dp(4), dp(14), dp(4), 0)
         }
-        content.addView(note)
+        root.addView(note)
     }
 
     private fun applyTheme(value: String) {
@@ -426,19 +448,72 @@ class SettingsActivity : AppCompatActivity() {
         })
     }
 
+    /**
+     * Раздел настроек: в списке видна строка с названием и коротким описанием, по нажатию раскрываются
+     * подробности и все параметры раздела. Какие разделы открыты, запоминается.
+     */
     private fun section(title: String, subtitle: String) {
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(6)) }
+        val open = title in openSections
+        val arrow = TextView(this).apply { text = if (open) "▾" else "▸"; textSize = 20f; setTextColor(ContextCompat.getColor(context, R.color.chat_text_dim)) }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(12), dp(12))
+            val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            texts.addView(TextView(context).apply {
+                text = title; textSize = 16.5f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(ContextCompat.getColor(context, R.color.chat_text))
+            })
+            texts.addView(TextView(context).apply {
+                text = shortText(subtitle); textSize = 12.5f; maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(ContextCompat.getColor(context, R.color.chat_text_dim))
+            })
+            addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(arrow)
+        }
+        val headCard = MaterialCardView(this).apply {
+            radius = dp(16).toFloat(); cardElevation = 0f
+            setCardBackgroundColor(ContextCompat.getColor(context, R.color.chat_surface))
+            strokeWidth = dp(1); setStrokeColor(ContextCompat.getColor(context, R.color.chat_stroke))
+            isClickable = true; isFocusable = true
+            addView(head)
+        }
+        root.addView(headCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        // Полное описание — первым в раскрытом разделе
+        body.addView(TextView(this).apply {
+            text = subtitle; textSize = 13f
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setTextColor(ContextCompat.getColor(context, R.color.chat_text_dim))
+            setPadding(dp(4), dp(8), dp(4), dp(6))
+        })
+        body.visibility = if (open) View.VISIBLE else View.GONE
+        root.addView(body, LinearLayout.LayoutParams(-1, -2).apply { marginStart = dp(6) })
+        headCard.setOnClickListener {
+            val nowOpen = body.visibility != View.VISIBLE
+            body.visibility = if (nowOpen) View.VISIBLE else View.GONE
+            arrow.text = if (nowOpen) "▾" else "▸"
+            if (nowOpen) openSections += title else openSections -= title
+            prefs.edit().putStringSet("settings_open", openSections.toSet()).apply()
+        }
+        content = body
+    }
+
+    /** Первое предложение описания — для свёрнутого вида. */
+    private fun shortText(s: String): String {
+        val first = s.split(Regex("(?<=[.!?])\\s|\\. ")).first().trim().trimEnd('.')
+        return if (first.length > 90) first.take(88).trimEnd() + "…" else first
+    }
+
+    /** Подзаголовок внутри раскрытого раздела. */
+    private fun subsection(title: String) {
         content.addView(TextView(this).apply {
-            text = title
-            textSize = 18f
+            text = title; textSize = 14.5f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setTextColor(ContextCompat.getColor(context, R.color.chat_text))
-            setPadding(dp(2), dp(18), dp(2), dp(3))
-        })
-        content.addView(TextView(this).apply {
-            text = subtitle
-            textSize = 13f
-            setTextColor(ContextCompat.getColor(context, R.color.chat_text_dim))
-            setPadding(dp(2), 0, dp(2), dp(8))
+            setPadding(dp(4), dp(12), dp(4), dp(4))
         })
     }
 

@@ -457,6 +457,25 @@ object Tools {
             ))
             put(tool("list_reminders", "Показывает запланированные напоминания."))
             put(tool(
+                "schedule_command",
+                "Выполнит любую команду ассистента позже: «через 5 минут напиши Максиму в WhatsApp доброе утро», «в 23:00 выключи Wi-Fi», «каждый день в 7:30 включи музыку». " +
+                    "Сообщение в мессенджер отправится само. Для простого напоминания используй set_reminder, для будильника — set_alarm.",
+                listOf(
+                    "command" to text("Команда своими словами, как её сказал бы пользователь, без времени: «напиши Максиму в WhatsApp доброе утро»"),
+                    "in_minutes" to number("Через сколько минут"),
+                    "time" to text("Время HH:mm"),
+                    "date" to text("Дата yyyy-MM-dd, если не сегодня"),
+                    "daily" to flag("Повторять каждый день")
+                ),
+                listOf("command")
+            ))
+            put(tool(
+                "scheduled_commands",
+                "Запланированные действия: list — показать, cancel — отменить (query — номер, часть текста или «все»).",
+                listOf("action" to choice("Что сделать", listOf("list", "cancel")), "query" to text("Номер, часть текста или «все»")),
+                listOf("action")
+            ))
+            put(tool(
                 "cancel_reminder",
                 "Отменяет напоминание, в тексте которого есть query; «все» отменяет все.",
                 listOf("query" to text("Часть текста напоминания или «все»"))
@@ -497,7 +516,7 @@ object Tools {
         "files" to listOf("find_media", "find_files"),
         "shared" to listOf("shared_folder"),
         "contacts" to listOf("call_contact", "message_contact", "find_contact"),
-        "time" to listOf("set_timer", "set_reminder", "list_reminders", "cancel_reminder"),
+        "time" to listOf("set_timer", "set_reminder", "list_reminders", "cancel_reminder", "schedule_command", "scheduled_commands"),
         "calendar" to listOf("calendar_add", "calendar_list"),
         "web" to listOf("web_search", "schedule_digest", "list_digests", "cancel_digest", "set_profile"),
         "profile" to listOf("set_profile"),
@@ -541,7 +560,7 @@ object Tools {
         "contacts" to listOf(
             "позвони", "звон", "контакт", "напиши", "сообщени", "смс", "sms", "ватсап", "whatsapp", "вацап", "номер", "телефон"
         ),
-        "time" to listOf("таймер", "напомни", "напомин", "отмени", "отмен"),
+        "time" to listOf("таймер", "напомни", "напомин", "отмени", "отмен", "через", "запланир", "расписан", "отлож", "ежедневн"),
         "calendar" to listOf("календар", "встреч", "событи", "запланир", "расписан", "завтра", "послезавтра", "недел"),
         "web" to listOf(
             "интернет", "новост", "погод", "курс", "свеж", "актуальн", "поищи", "найди", "загугли", "сводк", "присылай",

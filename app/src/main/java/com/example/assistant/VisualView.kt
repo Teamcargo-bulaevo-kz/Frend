@@ -513,47 +513,42 @@ class VisualView(context: Context, val visual: Visual, private val scaleText: Fl
         val k = (inner / v.w).toFloat()
         val h = (v.h * k).toFloat()
         val top = y0
+        val upTo = boardStep
+        val prog = boardProgress
         ops += { c ->
             c.save()
             c.translate(pad, top)
-            c.clipRect(0f, 0f, inner, h)
-            fill.color = color(v.background, CARD)
-            c.drawRoundRect(RectF(0f, 0f, inner, h), dp(8f), dp(8f), fill)
+            val clip = android.graphics.Path().apply { addRoundRect(RectF(0f, 0f, inner, h), dp(8f), dp(8f), android.graphics.Path.Direction.CW) }
+            c.clipPath(clip)
             c.scale(k, k)
-            v.shapes.forEachIndexed { i, s ->
-                val f = if (s.fill.isNotBlank()) color(s.fill, palette[i % palette.size]) else null
-                val st = color(s.stroke, if (f == null) palette[i % palette.size] else Color.TRANSPARENT)
-                stroke.color = st; stroke.strokeWidth = (s.width.toFloat()).coerceIn(0.5f, 20f)
-                val n = s.n.map { it.toFloat() }
-                when (s.t) {
-                    "rect", "box" -> { val r = RectF(n[0], n[1], n[0] + n[2], n[1] + n[3]); f?.let { fill.color = it; c.drawRoundRect(r, 4f, 4f, fill) }; if (st != Color.TRANSPARENT) c.drawRoundRect(r, 4f, 4f, stroke) }
-                    "ellipse", "oval" -> { val r = RectF(n[0], n[1], n[0] + n[2], n[1] + n[3]); f?.let { fill.color = it; c.drawOval(r, fill) }; if (st != Color.TRANSPARENT) c.drawOval(r, stroke) }
-                    "circle" -> { f?.let { fill.color = it; c.drawCircle(n[0], n[1], n[2], fill) }; if (st != Color.TRANSPARENT) c.drawCircle(n[0], n[1], n[2], stroke) }
-                    "line" -> c.drawLine(n[0], n[1], n[2], n[3], stroke)
-                    "arrow" -> {
-                        if (stroke.color == Color.TRANSPARENT) stroke.color = TEXT
-                        c.drawLine(n[0], n[1], n[2], n[3], stroke)
-                        val a = atan2((n[3] - n[1]).toDouble(), (n[2] - n[0]).toDouble())
-                        val len = 10f + stroke.strokeWidth * 2
-                        val p = Path().apply {
-                            moveTo(n[2], n[3])
-                            lineTo((n[2] - len * cos(a - 0.45)).toFloat(), (n[3] - len * sin(a - 0.45)).toFloat())
-                            lineTo((n[2] - len * cos(a + 0.45)).toFloat(), (n[3] - len * sin(a + 0.45)).toFloat()); close()
-                        }
-                        fill.color = stroke.color; c.drawPath(p, fill)
-                    }
-                    "text", "label" -> {
-                        val p = TextPaint(text).apply { textSize = s.size.toFloat().coerceIn(6f, 80f); color = color(s.fill.ifBlank { s.stroke }, TEXT) }
-                        c.drawText(s.text, n[0], n[1], p)
-                    }
-                    "poly", "polygon", "path" -> if (n.size >= 4) {
-                        val p = Path().apply { moveTo(n[0], n[1]); var j = 2; while (j + 1 < n.size) { lineTo(n[j], n[j + 1]); j += 2 }; if (s.t != "path") close() }
-                        f?.let { fill.color = it; c.drawPath(p, fill) }; if (st != Color.TRANSPARENT) c.drawPath(p, stroke)
-                    }
-                }
-            }
+            BoardPainter.paint(c, v, upTo, prog)
             c.restore()
         }
-        return top + h
+        var y = top + h
+        // Пояснения к шагам доски — под рисунком; в окне доски они показываются по одному
+        if (showNotes && v.notes.any { it.isNotBlank() }) {
+            y += dp(8f)
+            v.notes.forEachIndexed { i, note ->
+                if (note.isBlank()) return@forEachIndexed
+                val l = sl("${i + 1}. $note", small, inner, maxLines = 4)
+                val ty = y
+                ops += { c -> drawLayout(c, l, pad, ty) }
+                y += l.height + dp(4f)
+            }
+            val hint = sl("▶ Нажми — объясню по шагам", small, inner, maxLines = 1)
+            val hy = y + dp(2f)
+            ops += { c -> small.color = 0xFF9C8CFF.toInt(); drawLayout(c, hint, pad, hy); small.color = DIM }
+            y = hy + hint.height
+        }
+        return y
     }
+
+    /** Для окна доски: какой шаг показывать и насколько он дорисован. */
+    var boardStep: Int = Int.MAX_VALUE
+        set(value) { field = value; invalidateBoard() }
+    var boardProgress: Float = 1f
+        set(value) { field = value; invalidateBoard() }
+    var showNotes: Boolean = true
+
+    private fun invalidateBoard() { if (layoutWidth > 0) { build(layoutWidth); invalidate() } }
 }

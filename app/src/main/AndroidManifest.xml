@@ -81,6 +81,10 @@
         android:label="Assistant"
         android:theme="@style/Theme.Assistant">
 
+        <activity android:name=".HubActivity" android:exported="false" android:label="Меню" />
+        <activity android:name=".NotesActivity" android:exported="false" android:label="Заметки и память" />
+        <activity android:name=".ExplorerActivity" android:exported="false" android:label="Проводник" />
+        <activity android:name=".PromptSkillsActivity" android:exported="false" android:label="Промпт и навыки" />
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
@@ -231,6 +235,10 @@
 
         <receiver
             android:name=".DigestReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".ScheduledReceiver"
             android:exported="false" />
 
         <service

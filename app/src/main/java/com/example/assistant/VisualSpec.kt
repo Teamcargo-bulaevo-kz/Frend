@@ -26,14 +26,34 @@ sealed class Visual {
     data class Stat(val label: String, val value: String, val note: String = "", val color: String = "", val percent: Double? = null)
     data class Stats(override val title: String, val items: List<Stat>) : Visual()
     /** Рисунок фигурами в координатах w×h, как в Паскале: rect, circle, ellipse, line, arrow, text, poly. */
-    data class Shape(val t: String, val n: List<Double>, val text: String = "", val fill: String = "", val stroke: String = "", val width: Double = 2.0, val size: Double = 14.0)
-    data class Drawing(override val title: String, val w: Double, val h: Double, val shapes: List<Shape>, val background: String) : Visual()
+    /**
+     * Фигура рисунка. n — координаты по типу фигуры, opt — необязательные числа (o, r, a1, a2, step, xmin…, from, to),
+     * dash — «dash», «dot» или «center» (штрихпунктир осевой линии), step — на каком шаге объяснения фигура появляется
+     * (0 — сразу), ax — координаты в системе последних осей (axes), expr — формула графика (plot).
+     */
+    data class Shape(
+        val t: String, val n: List<Double>, val text: String = "", val fill: String = "", val stroke: String = "",
+        val width: Double = 2.0, val size: Double = 14.0, val dash: String = "", val step: Int = 0,
+        val opt: Map<String, Double> = emptyMap(), val ax: Boolean = false, val expr: String = "", val flag: Boolean = false
+    )
+
+    /**
+     * Рисунок фигурами. style: «plain» — цветная карточка, «chalk» — мелом по школьной доске (белым по чёрному, от руки),
+     * «blueprint» — технический чертёж (сетка, рамка, тонкие и основные линии). notes — пояснения к шагам: на шаге k
+     * видны фигуры со step ≤ k, а в окне доски они дорисовываются по очереди.
+     */
+    data class Drawing(
+        override val title: String, val w: Double, val h: Double, val shapes: List<Shape>, val background: String,
+        val style: String = "plain", val notes: List<String> = emptyList()
+    ) : Visual() {
+        val steps: Int get() = maxOf(notes.size, shapes.maxOfOrNull { it.step } ?: 0)
+    }
 }
 
 object VisualSpec {
 
     /** Языки блока кода, которые считаются наглядным блоком. */
-    val langs = setOf("visual", "viz", "chart", "diagram", "graph", "table", "tree", "draw", "plan")
+    val langs = setOf("visual", "viz", "chart", "diagram", "graph", "table", "tree", "draw", "plan", "board", "blueprint")
 
     fun parse(json: String): Visual? = try {
         val o = JSONObject(json.trim().let { if (it.startsWith("{")) it else it.substring(it.indexOf('{')) })
@@ -53,6 +73,8 @@ object VisualSpec {
             })
             "stats", "kpi", "cards", "tiles" -> stats(o, title)
             "draw", "drawing", "canvas", "picture", "scheme" -> drawing(o, title)
+            "board", "chalk", "доска" -> drawing(o, title, "chalk")
+            "blueprint", "чертеж", "чертёж", "technical" -> drawing(o, title, "blueprint")
             else -> guess(o, title)
         }
     }
@@ -60,7 +82,7 @@ object VisualSpec {
     /** Модель забыла type: угадываем по полям. */
     private fun guess(o: JSONObject, title: String): Visual? = when {
         o.has("columns") && o.has("rows") -> table(o, title)
-        o.has("shapes") -> drawing(o, title)
+        o.has("shapes") || o.has("steps") && o.optJSONArray("steps")?.optJSONObject(0)?.has("shapes") == true -> drawing(o, title)
         o.has("root") || o.has("children") -> tree(o, title)
         o.has("series") || o.has("labels") -> chart(o, title, "bar")
         o.has("data") -> pie(o, title, true)
@@ -202,30 +224,82 @@ object VisualSpec {
         return Visual.Stats(title, items)
     }
 
-    private fun drawing(o: JSONObject, title: String): Visual? {
-        val arr = o.optJSONArray("shapes") ?: return null
-        val shapes = (0 until arr.length()).mapNotNull { i ->
-            val s = arr.optJSONObject(i) ?: return@mapNotNull null
-            val t = s.optString("t", s.optString("type", "")).lowercase()
-            val n: List<Double> = when (t) {
-                "rect", "box", "ellipse", "oval" -> listOf("x", "y", "w", "h").map { s.optDouble(it, 0.0) }
-                "circle" -> listOf("x", "y", "r").map { s.optDouble(it, 0.0) }
-                "line", "arrow" -> listOf("x1", "y1", "x2", "y2").map { s.optDouble(it, 0.0) }
-                "text", "label" -> listOf("x", "y").map { s.optDouble(it, 0.0) }
-                "poly", "polygon", "path" -> s.optJSONArray("pts")?.let { p -> (0 until p.length()).map { p.optDouble(it, 0.0) } } ?: return@mapNotNull null
-                else -> return@mapNotNull null
+    private val optKeys = listOf("o", "r", "a1", "a2", "step", "xmin", "xmax", "ymin", "ymax", "from", "to", "gap", "angle")
+
+    private fun shape(s: JSONObject, stepDefault: Int): Visual.Shape? {
+        val t = s.optString("t", s.optString("type", "")).lowercase().let { aliases[it] ?: it }
+        fun d(k: String, alt: String? = null) = s.optDouble(k, if (alt != null) s.optDouble(alt, 0.0) else 0.0)
+        fun pts(): List<Double>? = s.optJSONArray("pts")?.let { p ->
+            (0 until p.length()).flatMap { i ->
+                // и плоский список [x,y,x,y], и пары [[x,y],[x,y]]
+                val e = p.opt(i)
+                if (e is JSONArray) listOf(e.optDouble(0, 0.0), e.optDouble(1, 0.0)) else listOf(p.optDouble(i, 0.0))
             }
-            Visual.Shape(t, n, s.optString("s", s.optString("text", "")).take(80), s.optString("fill"), s.optString("stroke", s.optString("color")),
-                s.optDouble("width", 2.0), s.optDouble("size", 14.0))
-        }.take(200)
+        }
+        val n: List<Double> = when (t) {
+            "rect", "ellipse", "grid", "axes" -> listOf(d("x"), d("y"), d("w"), d("h"))
+            "circle" -> listOf(d("x", "cx"), d("y", "cy"), d("r"))
+            "arc" -> listOf(d("x", "cx"), d("y", "cy"), d("r"), d("a1"), d("a2", "a"))
+            "line", "arrow", "dim", "darrow" -> listOf(d("x1"), d("y1"), d("x2"), d("y2"))
+            "text", "point" -> listOf(d("x"), d("y"))
+            "angle" -> listOf(d("x"), d("y"), d("x1"), d("y1"), d("x2"), d("y2"))
+            "poly", "path", "hatch", "curve" -> pts()?.takeIf { it.size >= 4 } ?: return null
+            "plot" -> emptyList()
+            else -> return null
+        }
+        val opt = optKeys.filter { s.has(it) && !s.isNull(it) }.associateWith { s.optDouble(it, 0.0) }.filterValues { !it.isNaN() }
+        val dash = when (val v = s.opt("dash")) {
+            is Boolean -> if (v) "dash" else ""
+            is String -> v.lowercase()
+            else -> if (s.optBoolean("dashed")) "dash" else ""
+        }
+        val label = s.optString("s", s.optString("text", s.optString("label", ""))).take(120)
+        return Visual.Shape(
+            t, n, label, s.optString("fill"), s.optString("stroke", s.optString("color")),
+            s.optDouble("width", if (s.optBoolean("thin")) 1.0 else 2.0), s.optDouble("size", 14.0), dash,
+            s.optInt("step", stepDefault).coerceIn(0, 50), opt, s.optBoolean("ax"), s.optString("f", s.optString("expr", "")).take(200),
+            s.optBoolean("right") || s.optBoolean("grid", t == "axes") && t == "axes"
+        )
+    }
+
+    private val aliases = mapOf("box" to "rect", "oval" to "ellipse", "label" to "text", "polygon" to "poly", "dot" to "point",
+        "dimension" to "dim", "size" to "dim", "graph" to "plot", "function" to "plot", "spline" to "curve", "section" to "hatch",
+        "polyline" to "path", "double_arrow" to "darrow", "vector" to "arrow")
+
+    private fun drawing(o: JSONObject, title: String, styleDefault: String = "plain"): Visual? {
+        val shapes = ArrayList<Visual.Shape>()
+        o.optJSONArray("shapes")?.let { arr -> (0 until arr.length()).forEach { i -> arr.optJSONObject(i)?.let { shape(it, 0) }?.let(shapes::add) } }
+        val notes = ArrayList<String>()
+        o.optJSONArray("steps")?.let { steps ->
+            for (i in 0 until steps.length()) {
+                val st = steps.opt(i)
+                if (st is JSONObject) {
+                    notes += st.optString("note", st.optString("say", st.optString("text", ""))).take(400)
+                    st.optJSONArray("shapes")?.let { arr -> (0 until arr.length()).forEach { j -> arr.optJSONObject(j)?.let { shape(it, i + 1) }?.let(shapes::add) } }
+                } else if (st != null) notes += st.toString().take(400)
+            }
+        }
+        if (notes.isEmpty()) o.optJSONArray("notes")?.let { notes += strings(it).map { n -> n.take(400) } }
         if (shapes.isEmpty()) return null
-        return Visual.Drawing(title, o.optDouble("w", 300.0).coerceIn(50.0, 2000.0), o.optDouble("h", 200.0).coerceIn(50.0, 2000.0), shapes, o.optString("bg"))
+        val style = when (o.optString("style", styleDefault).lowercase()) {
+            "chalk", "board", "доска", "мел" -> "chalk"
+            "blueprint", "чертеж", "чертёж", "tech", "technical", "gost", "гост" -> "blueprint"
+            else -> "plain"
+        }
+        return Visual.Drawing(title, o.optDouble("w", 300.0).coerceIn(50.0, 2000.0), o.optDouble("h", 200.0).coerceIn(50.0, 2000.0),
+            shapes.take(400), o.optString("bg"), style, notes.take(30))
     }
 
     // ---------------------------------------------------------------- для истории чата и озвучки
 
-    private val blockRe = Regex("```(visual|viz|chart|diagram|graph|table|tree|draw|plan)[ \\t]*\\r?\\n.*?(```|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+    private val blockRe = Regex("```(visual|viz|chart|diagram|graph|table|tree|draw|plan|board|blueprint)[ \\t]*\\r?\\n.*?(```|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val htmlBlock = Regex("```html[ \\t]*\\r?\\n.*?(```|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+
+    /** Первая доска с пошаговым объяснением в ответе — её окно можно открыть сразу. */
+    fun firstBoard(text: String): Visual.Drawing? = blockRe.findAll(text).mapNotNull { m ->
+        val body = m.value.substringAfter('\n').removeSuffix("```").trim()
+        parse(body) as? Visual.Drawing
+    }.firstOrNull { it.steps > 1 }
 
     /** Текст без наглядных блоков (мини-приложения и код остаются). */
     fun withoutVisual(text: String): String = text.replace(blockRe, "")

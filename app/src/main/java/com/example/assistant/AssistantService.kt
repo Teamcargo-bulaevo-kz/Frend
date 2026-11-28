@@ -87,6 +87,16 @@ class AssistantService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Разблокировка экрана: запланированные сообщения, ждавшие разблокировки, уходят сразу. */
+    private var unlock: UnlockReceiver? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            unlock = UnlockReceiver().also { registerReceiver(it, android.content.IntentFilter(Intent.ACTION_USER_PRESENT)) }
+        } catch (_: Exception) {}
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_TRANSLATE || intent?.action == ACTION_ASK_SCREEN) {
             // Закрываем шторку и работаем с приложением под ней
@@ -116,6 +126,8 @@ class AssistantService : Service() {
 
     override fun onDestroy() {
         running = false
+        unlock?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        unlock = null
         super.onDestroy()
     }
 }
