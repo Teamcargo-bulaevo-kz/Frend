@@ -15,7 +15,7 @@ object KnowledgeRank {
     )
 
     fun stems(text: String): Set<String> = TextMatch.normalize(text).split(' ')
-        .filter { it.length >= 2 && it !in stop }.map { if (it.length > 5) it.take(5) else it }.toSet()
+        .filter { it.length >= 2 && it !in stop }.map { if (it.length >= 5) it.take(4) else it }.toSet()
 
     data class Hit(val fact: Fact, val score: Double)
 
