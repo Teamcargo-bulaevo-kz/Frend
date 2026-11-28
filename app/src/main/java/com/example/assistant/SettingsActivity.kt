@@ -32,7 +32,7 @@ class SettingsActivity : AppCompatActivity() {
     /** Тело текущего раздела: в него добавляются карточки настроек. */
     private lateinit var content: LinearLayout
     /** Весь список разделов на экране. */
-    private lateinit var root: LinearLayout
+    private lateinit var sections: LinearLayout
     private val openSections by lazy { prefs.getStringSet("settings_open", emptySet())!!.toMutableSet() }
     private var fontChanged = false
 
@@ -89,12 +89,12 @@ class SettingsActivity : AppCompatActivity() {
         root.addView(header)
 
         val scroll = android.widget.ScrollView(this).apply { clipToPadding = false }
-        root = LinearLayout(this).apply {
+        sections = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(4), dp(16), dp(28))
         }
-        content = root
-        scroll.addView(root)
+        content = sections
+        scroll.addView(sections)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
 
@@ -437,7 +437,7 @@ class SettingsActivity : AppCompatActivity() {
             setTextColor(ContextCompat.getColor(context, R.color.chat_text_dim))
             setPadding(dp(4), dp(14), dp(4), 0)
         }
-        root.addView(note)
+        sections.addView(note)
     }
 
     private fun applyTheme(value: String) {
@@ -481,7 +481,7 @@ class SettingsActivity : AppCompatActivity() {
             isClickable = true; isFocusable = true
             addView(head)
         }
-        root.addView(headCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        sections.addView(headCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         // Полное описание — первым в раскрытом разделе
         body.addView(TextView(this).apply {
             text = subtitle; textSize = 13f
@@ -490,7 +490,7 @@ class SettingsActivity : AppCompatActivity() {
             setPadding(dp(4), dp(8), dp(4), dp(6))
         })
         body.visibility = if (open) View.VISIBLE else View.GONE
-        root.addView(body, LinearLayout.LayoutParams(-1, -2).apply { marginStart = dp(6) })
+        sections.addView(body, LinearLayout.LayoutParams(-1, -2).apply { marginStart = dp(6) })
         headCard.setOnClickListener {
             val nowOpen = body.visibility != View.VISIBLE
             body.visibility = if (nowOpen) View.VISIBLE else View.GONE
