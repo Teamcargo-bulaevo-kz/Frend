@@ -21,6 +21,8 @@ class AssistantService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.example.assistant.background.STOP"
+        const val ACTION_TRANSLATE = "com.example.assistant.background.TRANSLATE"
+        const val ACTION_ASK_SCREEN = "com.example.assistant.background.ASK_SCREEN"
 
         private const val CHANNEL_ID = "assistant_quick_access"
         private const val NOTIFICATION_ID = 2001
@@ -58,6 +60,10 @@ class AssistantService : Service() {
                 context, 3, Intent(context, AssistantService::class.java).setAction(ACTION_STOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
+            fun service(code: Int, action: String) = PendingIntent.getService(
+                context, code, Intent(context, AssistantService::class.java).setAction(action),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
             fun action(icon: Int, title: String, intent: PendingIntent) =
                 Notification.Action.Builder(Icon.createWithResource(context, icon), title, intent).build()
 
@@ -66,14 +72,15 @@ class AssistantService : Service() {
                 .setContentTitle("Ассистент")
                 .setContentText(lastText.substringAfter('\n').lineSequence().first())
                 .setStyle(Notification.BigTextStyle().bigText(lastText))
-                .setContentIntent(voice)
+                .setContentIntent(chat)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .addAction(action(android.R.drawable.ic_btn_speak_now, "Говорить", voice))
-                .addAction(action(android.R.drawable.ic_menu_edit, "Чат", chat))
-                .addAction(action(android.R.drawable.ic_menu_close_clear_cancel, "Выкл", stop))
+                // Перевод и вопрос про экран — в один тап из шторки (выключить уведомление: Настройки → «Кнопка ассистента в шторке»)
+                .addAction(action(android.R.drawable.ic_menu_sort_alphabetically, "Перевести", service(4, ACTION_TRANSLATE)))
+                .addAction(action(android.R.drawable.ic_menu_view, "Экран", service(5, ACTION_ASK_SCREEN)))
                 .build()
         }
     }
@@ -81,6 +88,11 @@ class AssistantService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TRANSLATE || intent?.action == ACTION_ASK_SCREEN) {
+            // Закрываем шторку и работаем с приложением под ней
+            AssistantAccessibilityService.instance?.globalAction("dismiss_shade")
+            if (intent.action == ACTION_TRANSLATE) ScreenQuick.translate(this, 900L) else ScreenQuick.ask(this, 900L)
+        }
         if (intent?.action == ACTION_STOP) {
             running = false
             stopForeground(STOP_FOREGROUND_REMOVE)

@@ -111,6 +111,9 @@ class SettingsActivity : AppCompatActivity() {
         addSwitch("Прикрепление файлов", "Показывать кнопку выбора файла в чате.", prefs.getBoolean("attachments_enabled", true)) {
             prefs.edit().putBoolean("attachments_enabled", it).apply()
         }
+        addSwitch("Быстрые кнопки в чате", "Над полем ввода: «Перевести экран», «Что на экране», «Живой экран». В шторке — плитки с теми же названиями (добавь их, изменив набор плиток).", prefs.getBoolean("quick_bar_enabled", true)) {
+            prefs.edit().putBoolean("quick_bar_enabled", it).apply()
+        }
         addSwitch("Подсказки в пустом чате", "Примеры команд, когда переписка пустая.", prefs.getBoolean("suggestions_enabled", true)) {
             prefs.edit().putBoolean("suggestions_enabled", it).apply()
         }
@@ -149,6 +152,8 @@ class SettingsActivity : AppCompatActivity() {
             "Система и интернет" to listOf(
                 "device_info" to "Состояние телефона",
                 "read_screen" to "Чтение экрана",
+                "kb" to "База знаний",
+                "skills" to "Навыки",
                 "screen_control" to "Управление экраном (назад, нажать, листать, ввести)",
                 "screen_translate" to "Переводчик на экране",
                 "live_screen" to "Живой экран",
@@ -260,6 +265,42 @@ class SettingsActivity : AppCompatActivity() {
         addSeek("Сколько ждать следующую реплику", AppSettings.int(this, AppSettings.DIALOG_WINDOW_S), " сек",
             AppSettings.DIALOG_WINDOW_S.min, AppSettings.DIALOG_WINDOW_S.max) {
             AppSettings.setInt(this, AppSettings.DIALOG_WINDOW_S, it)
+        }
+
+        section("Офлайн-мозг", "Работа без интернета: понималка команд, навыки и база знаний. Всё хранится в папке Assistant (База, Навыки)")
+        addChoice("Режим", arrayOf("Авто: онлайн, а без сети — офлайн", "Только онлайн (Groq)", "Только офлайн"), OfflineBrain.mode(this),
+            arrayOf("auto", "online", "offline")) { OfflineBrain.setMode(this, it) }
+        addAction("Обучить понималку сейчас", "Groq придумает разговорные варианты команд — потом они понимаются без интернета. Само — раз в 5 дней") {
+            Toast.makeText(this, "Обучаю… это займёт до минуты", Toast.LENGTH_SHORT).show()
+            Thread {
+                val r = try { kotlinx.coroutines.runBlocking { OfflineBrain.train(this, GroqClient(BuildConfig.GROQ_API_KEY, applicationContext)) } } catch (e: Exception) { "Ошибка: ${e.message}" }
+                runOnUiThread { androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Понималка").setMessage(r).setPositiveButton("Ок", null).show() }
+            }.start()
+        }
+        addAction("Навыки", "Сценарии на одну фразу: «я дома», «доброе утро», «спокойной ночи»… Включить и выключить") {
+            Thread {
+                val list = OfflineBrain.skills(this)
+                runOnUiThread {
+                    val checked = list.map { it.enabled }.toBooleanArray()
+                    androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Навыки (${list.size})")
+                        .setMultiChoiceItems(list.map { "${it.name} — «${it.triggers.firstOrNull().orEmpty()}»" }.toTypedArray(), checked) { _, i, on -> checked[i] = on }
+                        .setPositiveButton("Сохранить") { _, _ ->
+                            Thread { list.forEachIndexed { i, sk -> if (sk.enabled != checked[i]) OfflineBrain.saveSkill(this, sk.copy(enabled = checked[i])) } }.start()
+                        }
+                        .setNegativeButton("Отмена", null).show()
+                }
+            }.start()
+        }
+        addAction("База знаний", "Факты и справки, доступные без интернета: «запомни факт: …», «собери справочник по …», «что ты знаешь про …»") {
+            Thread {
+                val facts = OfflineBrain.facts(this)
+                val stats = OfflineBrain.stats(this)
+                runOnUiThread {
+                    androidx.appcompat.app.AlertDialog.Builder(this).setTitle("База знаний: ${facts.size}")
+                        .setMessage(stats + "\n\n" + facts.take(60).joinToString("\n") { "• " + it.title + if (it.source == "встроено") "" else "  (${it.source})" })
+                        .setPositiveButton("Ок", null).show()
+                }
+            }.start()
         }
 
         section("Экран", "Живой экран, переводчик и управление голосом. Нужна служба специальных возможностей «Assistant» (её можно включить через Shizuku)")

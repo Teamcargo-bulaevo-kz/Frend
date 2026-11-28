@@ -41,6 +41,8 @@ object LocalCommands {
 
         // «Когда я говорю „я дома“, включи вайфай и …» — пользователь учит связку (раньше заметок: там тоже «запомни»)
         Learning.parseTeach(text)?.let { return LocalCommand("teach", mapOf("phrase" to it.first, "commands" to it.second)) }
+        // База знаний, навыки, понималка (раньше заметок: «запомни факт» — это база, а не заметка)
+        parseBrain(text, t)?.let { return it }
         // Заметки: единственные команды, где текст может быть длинным
         parseNote(text, t)?.let { return it }
         // Калькулятор: «сколько будет 25 умножить на 4» (знаки и цифры нужны как есть, поэтому по исходному тексту)
@@ -527,6 +529,33 @@ object LocalCommands {
         }
         if (t in setOf("выключи таймер сна", "отмени таймер сна", "убери таймер сна"))
             return LocalCommand("music_control", mapOf("action" to "sleep", "amount" to 0))
+        return null
+    }
+
+    // ---------------------------------------------------------------- офлайн-мозг: база знаний, навыки, понималка
+
+    private fun parseBrain(raw: String, t: String): LocalCommand? {
+        fun kb(action: String, text: String = "") = LocalCommand("kb", mapOf("action" to action, "text" to text))
+        // «запомни факт: код домофона 1234», «добавь в базу знаний …» — текст как сказан
+        Regex("^(?:запомни факт|запиши факт|добавь в базу знаний|добавь в базу|сохрани в базу знаний|сохрани в базу)[\\s:,—-]+(.+)$", RegexOption.IGNORE_CASE)
+            .find(raw.trim())?.let { return kb("add", it.groupValues[1].trim()) }
+        Regex("^(?:что ты знаешь (?:про|о|об)|что в базе (?:знаний )?(?:про|о|об)|найди в базе (?:знаний )?|поищи в базе (?:знаний )?|что есть в базе про) (.+)$").find(t)?.let { return kb("search", it.groupValues[1]) }
+        Regex("^(?:собери|составь|сделай|создай) (?:мне )?(?:справочник|базу знаний|шпаргалку) (?:по|про|о|об|на тему) (.+)$").find(t)?.let { return kb("build", it.groupValues[1]) }
+        Regex("^(?:удали|убери) из базы (?:знаний )?(.+)$").find(t)?.let { return kb("delete", it.groupValues[1]) }
+        if (t in setOf("покажи базу знаний", "база знаний", "что в базе знаний", "что в базе", "моя база знаний")) return kb("list")
+        // Навыки
+        if (t in setOf("мои навыки", "навыки", "какие у тебя навыки", "покажи навыки", "список навыков")) return LocalCommand("skills", mapOf("action" to "list"))
+        Regex("^(?:создай|сделай|добавь) (?:новый )?навык[\\s:,—-]+(.+)$", RegexOption.IGNORE_CASE).find(raw.trim())
+            ?.let { return LocalCommand("skills", mapOf("action" to "create", "text" to it.groupValues[1].trim())) }
+        Regex("^(включи|выключи|отключи) навык (.+)$").find(t)?.let {
+            return LocalCommand("skills", mapOf("action" to if (it.groupValues[1] == "включи") "on" else "off", "text" to it.groupValues[2]))
+        }
+        // Понималка и режим
+        if (t in setOf("обучись", "обучи понималку", "потренируйся", "учись", "обучи себя", "дообучись")) return LocalCommand("brain", mapOf("action" to "train"))
+        if (t in setOf("работай без интернета", "режим офлайн", "офлайн режим", "включи офлайн режим")) return LocalCommand("brain", mapOf("action" to "offline"))
+        if (t in setOf("режим онлайн", "работай через интернет", "онлайн режим")) return LocalCommand("brain", mapOf("action" to "online"))
+        if (t in setOf("автоматический режим мозга", "режим авто", "авто режим")) return LocalCommand("brain", mapOf("action" to "auto"))
+        if (t in setOf("что ты знаешь без интернета", "статистика понималки", "как там понималка", "офлайн мозг")) return LocalCommand("brain", mapOf("action" to "stats"))
         return null
     }
 

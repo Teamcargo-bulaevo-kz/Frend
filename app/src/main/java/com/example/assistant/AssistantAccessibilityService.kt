@@ -240,6 +240,8 @@ class AssistantAccessibilityService : AccessibilityService() {
             "lock" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_LOCK_SCREEN else return false
             "screenshot" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_TAKE_SCREENSHOT else return false
             "split" -> if (android.os.Build.VERSION.SDK_INT >= 24) GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN else return false
+            // Закрыть шторку, не нажимая «назад» в приложении под ней (Android 12+)
+            "dismiss_shade" -> if (android.os.Build.VERSION.SDK_INT >= 31) GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE else GLOBAL_ACTION_BACK
             else -> return false
         }
         return performGlobalAction(action)

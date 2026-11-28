@@ -268,6 +268,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        buildQuickBar()
         if (!::input.isInitialized) return
         val prefs = getSharedPreferences("assistant_prefs", MODE_PRIVATE)
         findViewById<ImageButton>(R.id.attachButton).visibility =
@@ -292,6 +293,10 @@ class MainActivity : AppCompatActivity() {
         uiScope.launch(Dispatchers.IO) {
             // Музыка, которую система ещё не знает (скачанное, из мессенджеров), добавляется в медиатеку
             MusicIndexer.scanNewFiles(applicationContext)
+            // Понималка тихо дообучается раз в 5 дней (нужен интернет)
+            if (OfflineBrain.trainDue(applicationContext)) try {
+                OfflineBrain.train(applicationContext, GroqClient(BuildConfig.GROQ_API_KEY, applicationContext))
+            } catch (_: Exception) {}
             // Новые файлы в общей папке Assistant/Входящие: сообщаем в чате
             val fresh = SharedFolder.takeNewFiles(applicationContext)
             if (fresh.isNotEmpty()) {
@@ -373,6 +378,37 @@ class MainActivity : AppCompatActivity() {
     private fun updateEmptyState() {
         emptyState.visibility = if (adapter.itemCount == 0) View.VISIBLE else View.GONE
     }
+
+    private var liveChip: TextView? = null
+
+    /** Быстрые кнопки над полем ввода: перевести экран, спросить про экран, живой экран. */
+    private fun buildQuickBar() {
+        val bar = findViewById<android.widget.LinearLayout>(R.id.quickBar) ?: return
+        bar.removeAllViews()
+        val scroll = findViewById<View>(R.id.quickBarScroll)
+        val on = getSharedPreferences("assistant_prefs", MODE_PRIVATE).getBoolean("quick_bar_enabled", true)
+        scroll.visibility = if (on) View.VISIBLE else View.GONE
+        if (!on) return
+        val dp = resources.displayMetrics.density
+        fun chip(text: String, action: () -> Unit) = TextView(this).apply {
+            this.text = text
+            textSize = 13.5f
+            setTextColor(ContextCompat.getColor(context, R.color.chat_text))
+            setBackgroundResource(R.drawable.chip_bg)
+            setPadding((14 * dp).toInt(), (7 * dp).toInt(), (14 * dp).toInt(), (7 * dp).toInt())
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * dp).toInt(); topMargin = (4 * dp).toInt() }
+            setOnClickListener { action() }
+        }
+        // Чат сворачивается, и действие выполняется над приложением, которое было под ним
+        bar.addView(chip("Aあ  Перевести экран") { moveTaskToBack(true); ScreenQuick.translate(this, 900L) })
+        bar.addView(chip("?  Что на экране") { moveTaskToBack(true); ScreenQuick.ask(this, 900L) })
+        liveChip = chip(liveLabel()) { ScreenQuick.toggleLive(this); liveChip?.text = liveLabel() }
+        bar.addView(liveChip)
+    }
+
+    private fun liveLabel() = if (ScreenAssist.live(this)) "◉  Живой экран: вкл" else "○  Живой экран: выкл"
 
     /** Подсказки для пустого чата: нажал — отправилось. */
     private fun buildSuggestions() {

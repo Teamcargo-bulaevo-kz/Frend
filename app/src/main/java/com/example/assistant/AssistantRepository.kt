@@ -115,7 +115,12 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         }
         // Уровень 1: фразы, шаблоны и связки, которым ассистент уже научился (у модели или у пользователя)
         runLearned(normalized)?.let { return it }
+        // Навыки: «я дома», «доброе утро» и свои
+        withContext(Dispatchers.IO) { OfflineBrain.skillFor(context, prompt) }?.let { return runSkill(it) }
+        // Понималка: команда своими словами («вырубай инет» → «отключи мобильный интернет»), без модели
+        understood(prompt, relaxed = false)?.let { return it }
 
+        if (OfflineBrain.mode(context) == "offline") return offlineAnswer(prompt)
         return try {
             val answer = try {
                 askModel(prompt, normalized, fromVoice)
@@ -129,9 +134,67 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 askModel(prompt, normalized, fromVoice)
             }
             answer.also { summarizeInBackground() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            FriendlyError.text(e)
+            // Нет связи или модель недоступна: пробуем справиться офлайн, а не просто «ошибка»
+            if (OfflineBrain.mode(context) == "online") FriendlyError.text(e)
+            else offlineAnswer(prompt, FriendlyError.text(e))
         }
+    }
+
+    // ---------------------------------------------------------------- офлайн-мозг
+
+    private var learnedLoaded = false
+
+    /** Понималка: находит каноническую команду и выполняет её. null — не уверена. */
+    private suspend fun understood(prompt: String, relaxed: Boolean): String? {
+        if (!learnedLoaded) {
+            learnedLoaded = true
+            // Выученные фразы тоже становятся примерами: похожие формулировки понимаются без модели
+            OfflineBrain.learnedExamples = try {
+                patternDao.top(300).filter { !it.phrase.startsWith(Learning.TEMPLATE_PREFIX) }.map { ("learned:" + it.phrase) to it.phrase }
+            } catch (e: Exception) { emptyList() }
+            OfflineBrain.invalidate()
+        }
+        val match = withContext(Dispatchers.Default) { OfflineBrain.understand(context, prompt, relaxed) } ?: return null
+        ListenLog.add(context, "понималка", "«$prompt» → «${match.canonical}» (${"%.2f".format(match.score)})")
+        return resolveCanonical(match.canonical, prompt)
+    }
+
+    private suspend fun resolveCanonical(canonical: String, prompt: String): String? {
+        if (canonical.startsWith("skill:")) {
+            val name = canonical.removePrefix("skill:")
+            return withContext(Dispatchers.IO) { OfflineBrain.skills(context).firstOrNull { it.name == name } }?.let { runSkill(it) }
+        }
+        if (canonical.startsWith("learned:")) return runLearned(canonical.removePrefix("learned:"))
+        val filled = IntentModel.fill(canonical, prompt) ?: return null
+        LocalCommands.parse(filled)?.let { return runLocal(it) }
+        return runLearned(normalize(filled))
+    }
+
+    /** Навык: сначала ответ, потом его команды по порядку. */
+    private suspend fun runSkill(skill: Skill): String {
+        ListenLog.add(context, "навык", skill.name)
+        val results = ArrayList<String>()
+        if (skill.answer.isNotBlank()) results += skill.answer
+        for (step in skill.steps) {
+            val n = normalize(step)
+            val r = LocalCommands.parse(step)?.let { runLocal(it) } ?: runLearned(n)
+                ?: understood(step, relaxed = false)
+                ?: if (OfflineBrain.mode(context) != "offline") try { askModel(step, n, false) } catch (e: Exception) { "«$step» — сейчас недоступно" } else "«$step» — без интернета не умею"
+            results += r
+        }
+        return results.filter { it.isNotBlank() }.joinToString("\n")
+    }
+
+    /** Без интернета: понималка «помягче», потом база знаний, иначе честно говорим, что умеем офлайн. */
+    private suspend fun offlineAnswer(prompt: String, reason: String? = null): String {
+        understood(prompt, relaxed = true)?.let { return it }
+        val hits = withContext(Dispatchers.IO) { OfflineBrain.search(context, prompt) }
+        if (hits.isNotEmpty() && hits.first().score >= 1.5) return "Из базы знаний (без интернета):\n" + KnowledgeRank.answer(hits)
+        return (reason?.let { "$it\n" } ?: "") + "Без интернета на это ответить не могу. Офлайн работают: команды телефона, музыка, будильники и таймеры, " +
+            "заметки, навыки («мои навыки») и база знаний («что ты знаешь про …»)."
     }
 
     // ---------------------------------------------------------------- сводка старых сообщений
@@ -223,6 +286,12 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 put("content", client.systemPrompt())
             })
             if (!commandMode || AssistantPrompt.wantsVisual(prompt)) put(JSONObject().put("role", "system").put("content", AssistantPrompt.VISUAL_NOTE))
+            // Личная база знаний: подходящие записи подсказываем модели (номера, коды, справки пользователя)
+            try {
+                val hits = OfflineBrain.search(context, prompt, 3).filter { it.score >= 2.0 }
+                if (hits.isNotEmpty()) put(JSONObject().put("role", "system").put("content",
+                    "Из базы знаний пользователя (используй, если относится к вопросу):\n" + hits.joinToString("\n") { "• ${it.fact.title}: ${it.fact.body.take(300)}" }))
+            } catch (_: Exception) {}
             ChatHistory.summary(context)?.let { sum ->
                 put(JSONObject().apply {
                     put("role", "system")
@@ -535,6 +604,39 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 }
             }
             "mini_apps" -> withContext(Dispatchers.Main) { MiniApps.command(context, a.optStringOrNull("name")) }
+            "kb" -> withContext(Dispatchers.IO) {
+                when (a.optString("action", "search")) {
+                    "add" -> OfflineBrain.remember(context, a.optString("text"))
+                    "list" -> OfflineBrain.listText(context)
+                    "build" -> OfflineBrain.buildReference(context, client, a.optString("text"))
+                    "delete" -> {
+                        val hits = OfflineBrain.search(context, a.optString("text"), 3)
+                        if (hits.isEmpty()) "В базе нет записи про «${a.optString("text")}»."
+                        else if (!confirmed) Confirm.ask("Удалить из базы знаний: ${hits.joinToString("; ") { "«${it.fact.title}»" }}?")
+                        else "Удалил записей: ${OfflineBrain.deleteFacts(context, hits.map { it.fact.id })}."
+                    }
+                    else -> {
+                        val hits = OfflineBrain.search(context, a.optString("text"))
+                        if (hits.isEmpty()) "В базе знаний про это ничего нет. Добавить: «запомни факт: …» или «собери справочник по …»."
+                        else KnowledgeRank.answer(hits)
+                    }
+                }
+            }
+            "skills" -> withContext(Dispatchers.IO) {
+                when (a.optString("action", "list")) {
+                    "create" -> OfflineBrain.createSkill(context, client, a.optString("text"))
+                    "on" -> OfflineBrain.toggleSkill(context, a.optString("text"), true)
+                    "off" -> OfflineBrain.toggleSkill(context, a.optString("text"), false)
+                    else -> OfflineBrain.skillsText(context)
+                }
+            }
+            "brain" -> withContext(Dispatchers.IO) {
+                when (a.optString("action", "stats")) {
+                    "train" -> OfflineBrain.train(context, client, patternDao.top(80).filter { !it.phrase.startsWith(Learning.TEMPLATE_PREFIX) && it.functionName != Learning.TAUGHT }.map { it.phrase })
+                    "offline", "online", "auto" -> { OfflineBrain.setMode(context, a.optString("action")); "Режим мозга: ${OfflineBrain.modeTitle(a.optString("action"))}." }
+                    else -> OfflineBrain.stats(context) + " Режим: ${OfflineBrain.modeTitle(OfflineBrain.mode(context))}."
+                }
+            }
             "dev_report" -> withContext(Dispatchers.IO) { DevReport.share(context) }
             "screen_control" -> ScreenActions.control(context, a.optString("action", ""), a.optStringOrNull("text"), a.optStringOrNull("direction"))
             "screen_translate" -> ScreenAssist.translate(context, TranslateBatch.targetFrom(a.optString("language", "русский")))

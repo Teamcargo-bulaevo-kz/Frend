@@ -321,6 +321,18 @@ object Tools {
                 listOf("section")
             ))
             put(tool(
+                "kb",
+                "Личная база знаний пользователя (работает без интернета): add — сохранить факт/справку, search — найти, build — собрать справочник по теме (text — тема), list — показать, delete — удалить.",
+                listOf("action" to choice("Что сделать", listOf("add", "search", "build", "list", "delete")), "text" to text("Факт, запрос или тема")),
+                listOf("action")
+            ))
+            put(tool(
+                "skills",
+                "Навыки — сценарии из нескольких команд на одну фразу: create — создать по описанию (text), list — показать, on/off — включить/выключить навык (text — название).",
+                listOf("action" to choice("Что сделать", listOf("create", "list", "on", "off")), "text" to text("Описание или название навыка")),
+                listOf("action")
+            ))
+            put(tool(
                 "update_plan",
                 "План сложной просьбы из нескольких шагов: в начале — все шаги, потом обновляй done (сколько сделано). Для простых просьб не вызывай.",
                 listOf(
@@ -492,7 +504,8 @@ object Tools {
         "system" to listOf("quick_setting", "set_brightness"),
         "device" to listOf("device_info", "read_screen", "notifications", "grant_permissions"),
         "screen" to listOf("screen_control", "screen_translate", "live_screen", "read_screen", "close_app", "screen_guide"),
-        "filesort" to listOf("files")
+        "filesort" to listOf("files"),
+        "brain" to listOf("kb", "skills")
     )
 
     /** Признаки (начала слов) в тексте, по которым понятно, какие функции могут понадобиться. */
@@ -502,6 +515,7 @@ object Tools {
             "экран", "нажми", "кликни", "тапни", "прокрут", "пролист", "листай", "назад", "домой", "недавн", "заблокир",
             "введи", "напечатай", "переведи", "перевод", "живой", "закрой", "останови", "скриншот", "шторк"
         ),
+        "brain" to listOf("базе", "база", "базу", "справочник", "навык", "факт", "шпаргалк"),
         "filesort" to listOf("разлож", "отсортир", "сортир", "порядок", "дубликат", "одинаков", "больш", "занимает", "место", "загрузк", "файл", "верни"),
         "alarm" to listOf("будильник", "разбуд", "заведи"),
         "music" to listOf(
