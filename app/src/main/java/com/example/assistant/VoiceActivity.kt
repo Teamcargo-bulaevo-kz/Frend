@@ -30,6 +30,7 @@ class VoiceActivity : ComponentActivity() {
             null
         }
         if (text.isNullOrBlank()) {
+            WakeWordService.start(this)
             finish()
         } else {
             execute(text)
@@ -58,9 +59,15 @@ class VoiceActivity : ComponentActivity() {
 
     private fun startRecognition() {
         Speaker.stop()
+        // Микрофон занят фоновым словом активации — отдаём его системному распознаванию, иначе оно слышит тишину
+        WakeWordService.pauseForSystemVoiceInput(this)
         val intent = VoiceInput.intent(context = this)
         try {
-            voiceLauncher.launch(intent)
+            window.decorView.postDelayed({
+                if (!isFinishing) try { voiceLauncher.launch(intent) } catch (e: ActivityNotFoundException) {
+                    Toast.makeText(this, "На телефоне нет приложения для распознавания речи", Toast.LENGTH_LONG).show(); finish()
+                }
+            }, VoiceInput.afterSpeechDelayMs(this))
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, "На телефоне нет приложения для распознавания речи", Toast.LENGTH_LONG).show()
             finish()
@@ -72,6 +79,7 @@ class VoiceActivity : ComponentActivity() {
         AssistantRunner.process(app, text) { answer ->
             Toast.makeText(app, VisualSpec.plain(answer).take(300), Toast.LENGTH_LONG).show()
             AssistantService.showResult(app, text, answer)
+            WakeWordService.start(app)
             finish()
         }
     }

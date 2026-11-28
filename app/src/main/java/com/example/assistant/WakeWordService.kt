@@ -195,7 +195,7 @@ class WakeWordService : Service() {
             Speaker.stop()
             handler.removeCallbacks(releaseFocusRunnable)
             abandonAssistantAudioFocus()
-            playCue(listening = false)
+            Cues.play(this, Cues.Kind.CLOSE)
         }
         if (intent?.action == ACTION_TEST) diagnosticMode = true
         if (intent?.action == ACTION_DIALOG) {
@@ -248,8 +248,8 @@ class WakeWordService : Service() {
                         if (diagnosticMode) updateDiagnosticNotification("Распознаю: ${text.take(150)}")
                         // Пользователь договаривает оборванную команду: продлеваем ожидание
                         if (pendingCommand.isNotEmpty() && !processingCommand) armContinuation()
-                        // В диалоге пользователь начал говорить: окно не должно закрыться посреди фразы
-                        if (dialogActive && !processingCommand && awaitingUntil > 0L) {
+                        // Пользователь говорит в открытом окне: окно не должно закрыться посреди фразы
+                        if (!processingCommand && awaitingUntil > 0L) {
                             awaitingUntil = maxOf(awaitingUntil, System.currentTimeMillis() + 4_000L)
                         }
                         // Give immediate feedback as soon as an interim hypothesis contains the wake word.
@@ -402,10 +402,18 @@ class WakeWordService : Service() {
             }
             return
         }
-        // Ignore ambient speech while an assistant command is being processed.
-        if (processingCommand) return
-
         val command = WakeWord.commandAfter(text)
+        // Пока команда выполняется, посторонняя речь не мешает; но «Пятница, стоп» или новая команда со словом — слышим
+        if (processingCommand) {
+            if (command == null) return
+            if (command.isBlank() || TextMatch.normalize(command) in cancelWords) {
+                ListenLog.add(this, "отмена во время ответа", text)
+                cancelCurrent(); return
+            }
+            ListenLog.add(this, "новая команда вместо текущей", text)
+            cancelCurrent(quiet = true)
+        }
+
         if (command != null) {
             ListenLog.add(this, if (command.isBlank()) "слово активации" else "команда после слова", text)
             acquireAssistantAudioFocus()
@@ -421,25 +429,31 @@ class WakeWordService : Service() {
                 windowKind = WINDOW_WAKE
                 if (!listeningCuePlayed) playCue(listening = true)
                 listeningCuePlayed = true
-                // В режиме шёпота голосовое «Слушаю» не произносим: пока ассистент говорит, микрофон закрыт,
-                // и тихое начало команды терялось. Остаётся звуковой сигнал.
-                if (!AppSettings.bool(this, AppSettings.WHISPER, true)) Speaker.speak(this, "Слушаю")
-                val expectedEnd = awaitingUntil
-                handler.postDelayed({
-                    if (!stopped && awaitingUntil == expectedEnd) {
-                        awaitingUntil = 0L
-                        listeningCuePlayed = false
-                        abandonAssistantAudioFocus()
-                    }
-                }, commandWindowMs(this))
+                // Голосом «Слушаю» не отвечаем: пока ассистент говорит, микрофон не слышит, и начало команды терялось.
+                // Достаточно сигнала — можно сразу говорить.
+                scheduleWindowClose()
             }
             return
         }
 
-        if (System.currentTimeMillis() < awaitingUntil) {
+        if (System.currentTimeMillis() >= awaitingUntil) {
+            // Сигнал «слушаю» прозвучал по ошибке (распознавание передумало: «пятниц…» оказалось «в пятницу»):
+            // возвращаем музыку и готовим сигнал для следующего вызова
+            if (listeningCuePlayed && pendingCommand.isEmpty()) {
+                listeningCuePlayed = false
+                abandonAssistantAudioFocus()
+            }
+            return
+        }
+        run {
             if (dialogActive && pendingCommand.isEmpty() && BargeIn.isEnd(text)) {
                 ListenLog.add(this, "конец диалога", text)
                 endDialog(sayBye = true)
+                return
+            }
+            // Шум и междометия («а», «мм») командой не считаем ни в каком окне
+            if (pendingCommand.isEmpty() && windowKind != WINDOW_CONFIRM && !ListenFilter.meaningful(text)) {
+                ListenLog.add(this, "шум, пропускаю", text)
                 return
             }
             // Окно после ответа слушает без слова активации: чужой разговор и шум отбрасываем, окно остаётся открытым
@@ -524,20 +538,29 @@ class WakeWordService : Service() {
      * Short audible acknowledgement. A high ToneGenerator volume makes it clearer than
      * relying on TTS alone; actual loudness still follows the phone's media volume.
      */
-    private fun playCue(listening: Boolean) {
-        try {
-            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-            val enabled = prefs.getBoolean(if (listening) "start_cue_enabled" else "end_cue_enabled", true)
-            if (!enabled) return
-            val volume = prefs.getInt(if (listening) "start_cue_volume" else "end_cue_volume", 70).coerceIn(0, 100)
-            if (volume == 0) return
-            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, volume)
-            val type = if (listening) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_PROMPT
-            tone.startTone(type, if (listening) 180 else 260)
-            handler.postDelayed({ try { tone.release() } catch (_: Exception) {} }, 450L)
-        } catch (e: Exception) {
-            Log.w(TAG, "Не удалось проиграть звуковой сигнал", e)
-        }
+    private fun playCue(listening: Boolean) = Cues.play(this, if (listening) Cues.Kind.LISTEN else Cues.Kind.ACCEPT)
+
+    /**
+     * Закрывает окно ожидания команды, когда оно истекло. Если пользователь в это время говорил, окно продлено
+     * (см. onPartial) — проверяем снова позже. Закрытие отмечается мягким низким сигналом.
+     */
+    private fun scheduleWindowClose() {
+        handler.removeCallbacks(windowCloser)
+        handler.postDelayed(windowCloser, (awaitingUntil - System.currentTimeMillis()).coerceAtLeast(300L))
+    }
+
+    private val windowCloser = Runnable { closeWindowIfExpired() }
+
+    private fun closeWindowIfExpired() {
+        if (stopped || awaitingUntil == 0L) return
+        val left = awaitingUntil - System.currentTimeMillis()
+        if (left > 0) { handler.postDelayed(windowCloser, left + 50L); return }
+        if (processingCommand || pendingCommand.isNotEmpty() || dialogActive) return
+        awaitingUntil = 0L
+        listeningCuePlayed = false
+        ListenLog.add(this, "окно закрыто без команды", "")
+        Cues.play(this, Cues.Kind.CLOSE)
+        abandonAssistantAudioFocus()
     }
 
     private fun runWhenQuiet(waitedMs: Long = 0L, block: () -> Unit) {
@@ -551,39 +574,76 @@ class WakeWordService : Service() {
         acquireAssistantAudioFocus()
         awaitingUntil = System.currentTimeMillis() + commandWindowMs(this)
         windowKind = WINDOW_CONFIRM
-        playCue(listening = true)
+        Cues.play(this, Cues.Kind.LISTEN, mute = true)
         listeningCuePlayed = true
-        val expectedEnd = awaitingUntil
-        handler.postDelayed({
-            if (!stopped && awaitingUntil == expectedEnd) {
-                awaitingUntil = 0L
-                listeningCuePlayed = false
-            }
-        }, commandWindowMs(this))
+        scheduleWindowClose()
+    }
+
+    private val cancelWords = setOf("стоп", "отмена", "отмени", "хватит", "замолчи", "подожди", "не надо", "стой", "тихо")
+
+    /** Отменяет текущую команду и озвучку. quiet — без сигнала (сразу будет новая команда). */
+    private fun cancelCurrent(quiet: Boolean = false) {
+        commandGeneration++
+        AssistantRunner.cancel()
+        Speaker.stop()
+        processingCommand = false
+        handler.removeCallbacks(thinkingTick)
+        clearPending()
+        awaitingUntil = 0L
+        listeningCuePlayed = false
+        if (!quiet) { Cues.play(this, Cues.Kind.CLOSE); handler.postDelayed(releaseFocusRunnable, 600L) }
+    }
+
+    /** Долгая обработка (интернет, сложная просьба): тихий щелчок раз в 6 с, чтобы было понятно, что ассистент не завис. */
+    private var thinkingTicks = 0
+    private val thinkingTick = object : Runnable {
+        override fun run() {
+            if (stopped || !processingCommand || Speaker.isBusy()) return
+            if (thinkingTicks++ >= 4) return
+            Cues.play(this@WakeWordService, Cues.Kind.THINKING)
+            handler.postDelayed(this, 6_000L)
+        }
+    }
+
+    private fun looksFailed(answer: String): Boolean {
+        val t = answer.trimStart().lowercase()
+        return listOf("не получилось", "не удалось", "ошибка", "нет связи", "нет интернета", "не понял", "лимит", "сервер не отвечает").any { t.startsWith(it) }
     }
 
     private fun runCommand(command: String) {
         processingCommand = true
         handler.removeCallbacks(dialogTimeout)
+        handler.removeCallbacks(windowCloser)
+        handler.removeCallbacks(releaseFocusRunnable)
         val generation = ++commandGeneration
+        thinkingTicks = 0
+        handler.removeCallbacks(thinkingTick)
+        handler.postDelayed(thinkingTick, 4_500L)
         AssistantRunner.process(this, command) { answer ->
             if (generation != commandGeneration) return@process
+            handler.removeCallbacks(thinkingTick)
             AssistantService.showResult(applicationContext, command, answer)
-            // В режиме диалога после ответа слушаем сразу (ассистента можно перебить), без длинной паузы
-            val dialog = dialogActive || AppSettings.bool(this, AppSettings.DIALOG, true)
-            val pause = if (dialog) 250L else AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong()
+            if (looksFailed(answer)) Cues.play(this, Cues.Kind.ERROR)
+            // Короткая пауза после конца озвучки, чтобы хвост голоса не попал в микрофон
+            val pause = AppSettings.int(this, AppSettings.AFTER_ANSWER_MS).toLong().coerceAtMost(600L)
             handler.postDelayed({
                 // Ждём, пока ассистент договорит, и только потом снова слушаем
                 runWhenQuiet {
                     if (generation != commandGeneration) return@runWhenQuiet
                     processingCommand = false
+                    // После «включи музыку» окно диалога не открываем: микрофон слышал бы песню, а не тебя
+                    val musicStarted = MusicService.isRunning && PlayerState.playing && !explicitDialog
+                    val dialog = explicitDialog || (AppSettings.bool(this, AppSettings.DIALOG, true) && !musicStarted)
                     when {
                         // Ассистент задал вопрос «да или нет» — слушаем ответ без слова активации
                         AssistantRepository.hasPendingConfirmation() -> openConfirmWindow()
                         dialog -> openDialogWindow()
+                        else -> {
+                            if (dialogActive) endDialog(sayBye = false)
+                            // Музыку и другие звуки возвращаем сразу, а не через 15 секунд
+                            handler.postDelayed(releaseFocusRunnable, 400L)
+                        }
                     }
-                    handler.removeCallbacks(releaseFocusRunnable)
-                    handler.postDelayed(releaseFocusRunnable, 15_000L)
                 }
             }, pause)
         }
@@ -612,7 +672,7 @@ class WakeWordService : Service() {
         awaitingUntil = System.currentTimeMillis() + window
         windowKind = if (explicitDialog) WINDOW_BARGE else WINDOW_DIALOG
         listeningCuePlayed = true
-        playCue(listening = true)
+        Cues.play(this, Cues.Kind.LISTEN, mute = true)
         handler.removeCallbacks(dialogTimeout)
         handler.postDelayed(dialogTimeout, window)
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(
@@ -643,9 +703,9 @@ class WakeWordService : Service() {
         listeningCuePlayed = false
         if (wasActive) ListenLog.add(this, "диалог закончен", "")
         if (sayBye) Speaker.speak(this, "Хорошо, если что — зови.")
-        else if (wasExplicit) playCue(listening = false)
+        else if (wasActive) Cues.play(this, Cues.Kind.CLOSE)  // «перестал слушать»: мягкий низкий сигнал
         handler.removeCallbacks(releaseFocusRunnable)
-        handler.postDelayed(releaseFocusRunnable, 2_000L)
+        handler.postDelayed(releaseFocusRunnable, if (sayBye) 2_500L else 600L)
         // Слово активации выключено: служба работала только ради разговора
         if (!enabled(this)) runWhenQuiet { if (!dialogActive) stopSelf() }
     }
@@ -663,6 +723,7 @@ class WakeWordService : Service() {
         awaitingUntil = System.currentTimeMillis() + 12_000L
         windowKind = WINDOW_BARGE
         listeningCuePlayed = true
+        scheduleWindowClose()
         if (dialogActive) handler.postDelayed(dialogTimeout, 12_000L)
     }
 

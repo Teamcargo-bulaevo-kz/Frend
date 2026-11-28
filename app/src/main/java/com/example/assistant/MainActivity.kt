@@ -516,7 +516,8 @@ class MainActivity : AppCompatActivity() {
                 FriendlyError.text(e)
             }
             ChatHistory.append(applicationContext, "assistant", answer, chatId)
-            if (Speaker.enabled(applicationContext)) Speaker.speak(applicationContext, answer)
+            // Спросили голосом — отвечаем голосом, даже если озвучка текстовых ответов выключена
+            if (fromVoice || Speaker.enabled(applicationContext)) Speaker.speak(applicationContext, answer)
             adapter.add(ChatMessage("assistant", answer, System.currentTimeMillis()))
             scrollToEnd()
             busy = false

@@ -43,6 +43,8 @@ object AppSettings {
     const val BARGE_IN = "barge_in"
     /** Сколько ждать следующей реплики в диалоге. */
     val DIALOG_WINDOW_S = IntSpec("dialog_window_s", 8, 4, 20)
+    /** Сколько тишины после слов считать концом фразы для слова активации и команд (быстрее ответ ↔ реже обрыв). */
+    val END_SILENCE_MS = IntSpec("end_silence_ms", 1000, 600, 2000)
 
     val CHAT_TEXT_SP = IntSpec("chat_text_size", 16, 13, 23)
     /** Масштаб текста всего приложения, в процентах. */
@@ -107,7 +109,7 @@ object AppSettings {
         val editor = p.edit()
         listOf(
             CUE_START_VOLUME, CUE_END_VOLUME, REQUEST_TIMEOUT_S, CONNECT_TIMEOUT_S, RETRY_WAIT_S,
-            VOICE_DELAY_MS, AFTER_ANSWER_MS, VOICE_SILENCE_MS, CHAT_TEXT_SP, FONT_SCALE, MIC_GAIN, DIALOG_WINDOW_S
+            VOICE_DELAY_MS, AFTER_ANSWER_MS, VOICE_SILENCE_MS, CHAT_TEXT_SP, FONT_SCALE, MIC_GAIN, DIALOG_WINDOW_S, END_SILENCE_MS
         ).forEach { editor.remove(it.key) }
         editor.remove(WHISPER).remove(DIALOG).remove(BARGE_IN).remove(CUE_START_ON).remove(CUE_END_ON).remove(THEME).remove("command_window_ms")
         p.all.keys.filter { it.startsWith("feature_") }.forEach { editor.remove(it) }

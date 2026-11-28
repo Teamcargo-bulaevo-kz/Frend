@@ -32,13 +32,25 @@ object Speaker {
         private set
 
     /** Ассистент говорит прямо сейчас (без хвоста после конца фразы). */
-    fun isSpeaking(): Boolean = speakingSince != 0L && System.currentTimeMillis() - speakingSince < MAX_SPEECH_MS
+    fun isSpeaking(): Boolean = speakingSince != 0L && System.currentTimeMillis() - speakingSince < expectedMs
+
+    /** Сколько может идти текущая фраза: по длине текста (защита от зависшей озвучки — иначе микрофон глохнет). */
+    @Volatile private var expectedMs = MAX_SPEECH_MS
+    /** Короткая «тишина» для сигналов: пока звучит пик, распознаватель его не слушает. */
+    @Volatile private var mutedUntil = 0L
+
+    fun muteFor(ms: Long) { mutedUntil = maxOf(mutedUntil, System.currentTimeMillis() + ms) }
 
     fun isBusy(): Boolean {
         val now = System.currentTimeMillis()
-        if (speakingSince != 0L && now - speakingSince < MAX_SPEECH_MS) return true
+        if (now < mutedUntil) return true
+        if (speakingSince != 0L && now - speakingSince < expectedMs) return true
         return now - lastEnd < TAIL_MS
     }
+
+    /** Оценка длительности фразы: ~14 символов в секунду с учётом скорости, плюс запас на запуск движка. */
+    internal fun estimateMs(text: String, rate: Float): Long =
+        (text.length * 72L / rate.coerceIn(0.5f, 2.5f).toDouble()).toLong().plus(4000L).coerceIn(3000L, MAX_SPEECH_MS)
 
     private fun markStart() { speakingSince = System.currentTimeMillis() }
     private fun markEnd() { speakingSince = 0L; lastEnd = System.currentTimeMillis() }
@@ -88,6 +100,12 @@ object Speaker {
                         created.setLanguage(Locale.getDefault())
                     }
                     applySettings(app, created)
+                    // Голос ассистента — как у голосовых помощников: не путается с музыкой и уведомлениями
+                    try {
+                        created.setAudioAttributes(android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    } catch (_: Exception) {}
                     created.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                         override fun onStart(utteranceId: String?) { markStart() }
                         override fun onDone(utteranceId: String?) { markEnd() }
@@ -100,8 +118,10 @@ object Speaker {
                     waiting.clear()
                     todo.forEach { it(created) }
                 } else {
+                    // Озвучки нет на телефоне: не держим микрофон «занятым»
                     tts = null
                     waiting.clear()
+                    markEnd()
                 }
             }
         }
@@ -146,8 +166,9 @@ object Speaker {
         val spoken = if (brief(context)) SpeechText.brief(text) else clean(text)
         if (spoken.isEmpty()) return
         currentText = spoken
+        expectedMs = estimateMs(spoken, rate(context))
         markStart()
-        ensure(context) { it.speak(spoken, TextToSpeech.QUEUE_FLUSH, Bundle(), "assistant") }
+        ensure(context) { if (it.speak(spoken, TextToSpeech.QUEUE_FLUSH, Bundle(), "assistant") == TextToSpeech.ERROR) markEnd() }
     }
 
     /** Короткая проверка голоса в настройках. */

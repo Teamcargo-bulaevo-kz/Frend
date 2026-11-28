@@ -68,6 +68,12 @@ class SherpaWakeWordEngine(context: Context) {
                             numThreads = 2,
                             provider = "cpu"
                         ),
+                        // Конец фразы: после слов — пауза из настроек (по умолчанию 1 с вместо 1,4 с); тишина без слов — 2 с; не дольше 20 с
+                        endpointConfig = com.k2fsa.sherpa.onnx.EndpointConfig(
+                            rule1 = com.k2fsa.sherpa.onnx.EndpointRule(false, 2.0f, 0.0f),
+                            rule2 = com.k2fsa.sherpa.onnx.EndpointRule(true, AppSettings.int(appContext, AppSettings.END_SILENCE_MS) / 1000f, 0.0f),
+                            rule3 = com.k2fsa.sherpa.onnx.EndpointRule(false, 0.0f, 20.0f)
+                        ),
                         enableEndpoint = true,
                         decodingMethod = "greedy_search"
                     )

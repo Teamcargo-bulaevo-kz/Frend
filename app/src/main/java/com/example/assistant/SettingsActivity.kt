@@ -188,18 +188,27 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        section("Звуковые сигналы", "Звуки начала и завершения команды настраиваются независимо")
-        addSwitch("Сигнал начала прослушивания", "Короткий сигнал после обнаружения слова активации.", prefs.getBoolean("start_cue_enabled", true)) {
+        section("Звуковые сигналы", "Высокий «пик» — слушаю, говори. Двойной — команда принята. Тихий щелчок — думаю дольше обычного. Низкий мягкий — перестал слушать. Низкий двойной — не получилось.")
+        addAction("Прослушать сигналы", "По очереди: слушаю → принял → думаю → перестал слушать → ошибка") {
+            val kinds = listOf(Cues.Kind.LISTEN, Cues.Kind.ACCEPT, Cues.Kind.THINKING, Cues.Kind.CLOSE, Cues.Kind.ERROR)
+            val h = android.os.Handler(android.os.Looper.getMainLooper())
+            kinds.forEachIndexed { i, k -> h.postDelayed({ Cues.play(this, k) }, i * 900L) }
+        }
+        addSwitch("Сигнал начала прослушивания", "«Пик» после слова активации и когда ассистент ждёт ответа.", prefs.getBoolean("start_cue_enabled", true)) {
             prefs.edit().putBoolean("start_cue_enabled", it).apply()
         }
         addSeek("Громкость сигнала начала", prefs.getInt("start_cue_volume", 70), "%", 0, 100) {
             prefs.edit().putInt("start_cue_volume", it).apply()
         }
-        addSwitch("Сигнал завершения", "Короткий сигнал после распознавания команды.", prefs.getBoolean("end_cue_enabled", true)) {
+        addSwitch("Остальные сигналы", "Команда принята, думаю, перестал слушать, ошибка.", prefs.getBoolean("end_cue_enabled", true)) {
             prefs.edit().putBoolean("end_cue_enabled", it).apply()
         }
         addSeek("Громкость сигнала завершения", prefs.getInt("end_cue_volume", 70), "%", 0, 100) {
             prefs.edit().putInt("end_cue_volume", it).apply()
+        }
+        addSeek("Пауза конца фразы", AppSettings.int(this, AppSettings.END_SILENCE_MS), " мс",
+            AppSettings.END_SILENCE_MS.min, AppSettings.END_SILENCE_MS.max) {
+            AppSettings.setInt(this, AppSettings.END_SILENCE_MS, it)
         }
         addSeek("Время на команду после активации", (prefs.getLong("command_window_ms", 10_000L) / 1000L).toInt(), " сек", 3, 30) {
             prefs.edit().putLong("command_window_ms", it * 1000L).apply()
