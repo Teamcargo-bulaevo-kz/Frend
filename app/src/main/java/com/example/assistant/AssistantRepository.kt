@@ -87,7 +87,9 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             }
         }
         asks.clear()
-        val answer = handleInner(prompt, fromVoice)
+        val raw = handleInner(prompt, fromVoice)
+        // Список с цифрами без картинки — дорисовываем столбцы (процессы, приложения, файлы…)
+        val answer = raw + AutoVisual.forText(raw)
         if (asks.isNotEmpty()) {
             pendingState = Pending(asks.toList(), System.currentTimeMillis())
             return answer + "\nСкажи «да» или «нет»."

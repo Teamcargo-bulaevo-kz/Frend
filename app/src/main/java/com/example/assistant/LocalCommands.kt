@@ -813,6 +813,8 @@ object LocalCommands {
         fun has(vararg stems: String) = w.any { x -> stems.any { x.startsWith(it) } }
         fun cmd(section: String) = LocalCommand("device_info", mapOf("section" to section))
 
+        // «какие приложения жрут батарею», «кто тратит заряд», «расход батареи»
+        if (has("заряд", "батаре", "аккумулятор") && has("приложени", "жрут", "жрет", "жрёт", "съеда", "тратит", "тратят", "расход", "потребл", "садят", "сажают", "кто")) return cmd("battery_apps")
         if (has("износ", "цикл", "здоровь", "емкост", "ёмкост") && has("батаре", "аккумулятор")) return cmd("battery_health")
         if (has("полн", "подробн", "весь", "всю") && has("отчет", "отчёт", "состоян", "информац", "сводк") && !has("заметк")) return cmd("full")
         if (has("модел", "верси") && has("телефон", "андроид", "android", "устройств") && w.size <= 6) return cmd("device")

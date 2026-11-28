@@ -57,6 +57,7 @@ object DeviceActions {
                     else DeviceReport.appsByUsage(DeviceStatus.usage(app))
                 }
                 "processes" -> processes(app)
+                "battery_apps" -> batteryApps(app)
                 "battery_health" -> batteryHealth(app)
                 "toggles" -> SystemToggle.diagnose(app)
                 "device" -> deviceLine(app)
@@ -119,6 +120,33 @@ object DeviceActions {
             if (pkg !in names) names[pkg] = try { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() } catch (e: Exception) { pkg }
         }
         return ProcessReport.format(list, names)
+    }
+
+    private fun label(context: Context, uid: Int): String {
+        if (uid < 10_000) return when (uid) { 0 -> "Ядро системы"; 1000 -> "Система Android"; 1001 -> "Связь (телефон)"; 1010 -> "Wi-Fi"; 1013 -> "Медиа"; else -> "Система ($uid)" }
+        val pm = context.packageManager
+        val pkgs = pm.getPackagesForUid(uid).orEmpty()
+        return pkgs.firstNotNullOfOrNull { p -> try { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() } catch (e: Exception) { null } }
+            ?: pkgs.firstOrNull() ?: "uid $uid"
+    }
+
+    /** Расход заряда по приложениям: точно — через Shizuku (статистика батареи), иначе — время использования. */
+    private fun batteryApps(context: Context): String {
+        if (Shell.available(context)) {
+            var items = BatteryUsage.parse(Shell.run("dumpsys batterystats --checkin", 30_000).output)
+            if (items.isEmpty()) items = BatteryUsage.parse(Shell.run("dumpsys batterystats", 30_000).output)
+            if (items.isNotEmpty()) {
+                val named = items.map { label(context, it.uid) to it.mah }.groupBy({ it.first }, { it.second }).map { it.key to it.value.sum() }
+                    .sortedByDescending { it.second }
+                return BatteryUsage.format(named) +
+                    VisualSpec.block(VisualSpec.barJson("Расход заряда, мА·ч", named.take(10).map { it.first to Math.round(it.second * 10) / 10.0 }, "мА·ч"))
+            }
+        }
+        val usage = if (DeviceStatus.hasUsageAccess(context)) DeviceStatus.usage(context) else emptyList()
+        val note = if (Shell.available(context)) "Система не отдала статистику батареи." else "Точный расход заряда по приложениям покажу через Shizuku."
+        if (usage.isEmpty()) return "$note Сейчас могу показать заряд: «сколько заряда»."
+        return "$note Пока — кто дольше всего работал на экране за сутки (это главный расход):\n" +
+            DeviceReport.appsByUsage(usage)
     }
 
     /** Текст с экрана (только если пользователь разрешил и включена служба специальных возможностей). */

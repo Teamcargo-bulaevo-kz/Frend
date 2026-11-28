@@ -314,8 +314,8 @@ object Tools {
                 "Состояние телефона: заряд батареи, сеть, оперативная память, место на телефоне, приложения по времени использования и по занятому месту, процессы. Цифры о телефоне бери только отсюда, не называй из памяти.",
                 listOf(
                     "section" to choice(
-                        "Что показать: battery — заряд; battery_health — износ батареи и циклы; network — сеть; memory — оперативная память; storage — место на телефоне; memory_all — оба вида памяти; files — какие файлы занимают место (по типам и папкам); big_files — самые большие файлы; duplicates — одинаковые файлы; apps_storage — какие приложения занимают место; apps_usage — какие приложения чаще используются; processes — процессы и память по приложениям; device — модель, Android, время работы; all — сводка; full — полный отчёт",
-                        listOf("battery", "battery_health", "network", "memory", "storage", "memory_all", "files", "big_files", "duplicates", "apps_storage", "apps_usage", "processes", "device", "all", "full")
+                        "Что показать: battery — заряд; battery_apps — какие приложения тратят заряд; battery_health — износ батареи и циклы; network — сеть; memory — оперативная память; storage — место на телефоне; memory_all — оба вида памяти; files — какие файлы занимают место (по типам и папкам); big_files — самые большие файлы; duplicates — одинаковые файлы; apps_storage — какие приложения занимают место; apps_usage — какие приложения чаще используются; processes — процессы и память по приложениям; device — модель, Android, время работы; all — сводка; full — полный отчёт",
+                        listOf("battery", "battery_apps", "battery_health", "network", "memory", "storage", "memory_all", "files", "big_files", "duplicates", "apps_storage", "apps_usage", "processes", "device", "all", "full")
                     )
                 ),
                 listOf("section")

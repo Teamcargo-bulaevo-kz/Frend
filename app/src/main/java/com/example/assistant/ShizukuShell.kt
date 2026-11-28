@@ -17,6 +17,7 @@ object ShellPolicy {
     private val allowed = listOf(
         Regex("""dumpsys (meminfo|battery|batterystats|usagestats|netstats|cpuinfo|diskstats|connectivity|wifi)"""),
         Regex("""dumpsys meminfo [A-Za-z0-9._]+"""),
+        Regex("""dumpsys batterystats( --checkin| --charged)?"""),
         Regex("""dumpsys activity (top|activities|processes|recents)"""),
         Regex("""dumpsys window (displays|windows)"""),
         Regex("""ps -A( -o [A-Za-z,_%]+)?"""),
@@ -95,7 +96,7 @@ object ShizukuShell : ShellBackend {
     private const val PREFS = "assistant_prefs"
     const val KEY_ENABLED = "shizuku_enabled"
     const val PACKAGE = "moe.shizuku.privileged.api"
-    private const val MAX_OUTPUT = 200_000
+    private const val MAX_OUTPUT = 2_000_000
 
     override val name = "Shizuku"
 
