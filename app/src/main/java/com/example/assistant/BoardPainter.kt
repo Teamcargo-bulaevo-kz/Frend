@@ -93,9 +93,10 @@ object BoardPainter {
         return p * when { m < 1.5 -> 1.0; m < 3.5 -> 2.0; m < 7.5 -> 5.0; else -> 10.0 }
     }
 
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-    private val text = Paint(Paint.ANTI_ALIAS_FLAG)
+    // Кисти создаются при первом рисовании (в юнит-тестах Android-классов нет)
+    private val fill by lazy { Paint(Paint.ANTI_ALIAS_FLAG) }
+    private val line by lazy { Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND } }
+    private val text by lazy { Paint(Paint.ANTI_ALIAS_FLAG) }
 
     @Synchronized
     fun paint(c: Canvas, v: Visual.Drawing, upTo: Int = Int.MAX_VALUE, progress: Float = 1f) {
