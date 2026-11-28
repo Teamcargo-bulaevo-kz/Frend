@@ -1,0 +1,9 @@
+<!doctype html><html><head><title>Генератор паролей</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Генератор паролей</h1>
+<div class="card"><div id="p" class="big" style="font-size:24px;word-break:break-all">—</div></div>
+<div>Длина: <b id="lv">16</b></div><input id="l" type="range" min="6" max="40" value="16">
+<label><input type="checkbox" id="d" checked style="width:auto"> цифры</label> <label><input type="checkbox" id="y" checked style="width:auto"> символы</label> <label><input type="checkbox" id="u" checked style="width:auto"> заглавные</label>
+<div class="row"><button class="p" id="g">Создать</button><button id="c">Скопировать</button></div><p class="dim">Пароль создаётся на телефоне и никуда не отправляется.</p>
+<script>
+function gen(){let s='abcdefghijkmnopqrstuvwxyz';if(u.checked)s+='ABCDEFGHJKLMNPQRSTUVWXYZ';if(d.checked)s+='23456789';if(y.checked)s+='!@#$%&*-_+=?';const a=new Uint32Array(+l.value);crypto.getRandomValues(a);p.textContent=Array.from(a,x=>s[x%s.length]).join('')}
+l.oninput=()=>{lv.textContent=l.value;gen()};g.onclick=gen;c.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(p.textContent).then(()=>c.textContent='Скопировано',()=>c.textContent='Выдели и скопируй')};gen();
+</script></body></html>

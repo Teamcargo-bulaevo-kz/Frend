@@ -1,0 +1,8 @@
+<!doctype html><html><head><title>Таблица умножения</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Тренажёр: таблица умножения</h1>
+<div id="q" class="big"></div><input id="a" type="number" inputmode="numeric" placeholder="Ответ"><button class="p" style="width:100%" id="ok">Проверить</button>
+<div id="f" class="big" style="font-size:22px"></div><p class="dim">Верно: <b id="g">0</b> · Ошибок: <b id="b">0</b></p>
+<script>
+let x,y;const nq=()=>{x=2+Math.floor(Math.random()*8);y=2+Math.floor(Math.random()*8);q.textContent=x+' × '+y+' = ?';a.value='';a.focus()};
+ok.onclick=()=>{if(+a.value===x*y){g.textContent=+g.textContent+1;f.textContent='Верно! 👍';f.style.color='#5BD18B'}else{b.textContent=+b.textContent+1;f.textContent='Нет: '+x+' × '+y+' = '+x*y;f.style.color='#FF6B6B'}nq()};
+a.onkeydown=e=>{if(e.key==='Enter')ok.onclick()};nq();
+</script></body></html>

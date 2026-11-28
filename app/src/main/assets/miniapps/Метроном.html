@@ -1,0 +1,10 @@
+<!doctype html><html><head><title>Метроном</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Метроном</h1>
+<div id="v" class="big" style="font-size:64px">100</div><div class="dim" style="text-align:center">ударов в минуту</div>
+<input id="bpm" type="range" min="40" max="220" value="100"><div class="row"><button onclick="ch(-5)">−5</button><button class="p" id="go">Старт</button><button onclick="ch(5)">+5</button></div>
+<div class="row"><select id="m"><option>2</option><option>3</option><option selected>4</option><option>6</option></select></div><div id="dot" class="big">●</div>
+<script>
+let c,tid=0,n=0;const ch=d=>{bpm.value=+bpm.value+d;upd()};function upd(){v.textContent=bpm.value;if(tid){stop();start()}}
+function tick(){const o=c.createOscillator(),g=c.createGain();o.frequency.value=n%(+m.value)===0?1200:800;g.gain.setValueAtTime(.6,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.08);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.09);dot.style.color=n%(+m.value)===0?'#FFD166':'#7C6CFF';n++}
+function start(){c=c||new AudioContext();n=0;tick();tid=setInterval(tick,60000/+bpm.value);go.textContent='Стоп'}function stop(){clearInterval(tid);tid=0;go.textContent='Старт'}
+go.onclick=()=>tid?stop():start();bpm.oninput=upd;
+</script></body></html>

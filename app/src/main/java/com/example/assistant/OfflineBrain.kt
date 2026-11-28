@@ -48,11 +48,22 @@ object OfflineBrain {
         db?.let { if (it.isOpen && dbPath == file.path) return it }
         val d = SQLiteDatabase.openOrCreateDatabase(file, null)
         d.execSQL("CREATE TABLE IF NOT EXISTS facts(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT NOT NULL, tags TEXT, source TEXT, created INTEGER)")
+        // Встроенные справочники досеваются по одному разу: новые файлы появляются при обновлении приложения
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val count = d.rawQuery("SELECT COUNT(*) FROM facts", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
-        if (count == 0) {
-            asset(context, "brain/knowledge.tsv").lineSequence().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('\t') }
-                .forEach { line -> insert(d, line.substringBefore('\t'), line.substringAfter('\t'), "", "встроено") }
+        val seeded = prefs.getStringSet("kb_seeded", null)?.toMutableSet() ?: if (count > 0) mutableSetOf("knowledge") else mutableSetOf()
+        var changed = false
+        for ((file, source) in listOf("knowledge" to "встроено", "countries" to "страны мира")) {
+            if (file in seeded) continue
+            d.beginTransaction()
+            try {
+                asset(context, "brain/$file.tsv").lineSequence().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('\t') }
+                    .forEach { line -> insert(d, line.substringBefore('\t'), line.substringAfter('\t'), "", source) }
+                d.setTransactionSuccessful()
+            } finally { d.endTransaction() }
+            seeded += file; changed = true
         }
+        if (changed) prefs.edit().putStringSet("kb_seeded", seeded).apply()
         db = d; dbPath = file.path
         return d
     }
@@ -85,7 +96,7 @@ object OfflineBrain {
 
     fun listText(context: Context): String {
         val all = facts(context)
-        val mine = all.filter { it.source != "встроено" }
+        val mine = all.filter { it.source != "встроено" && it.source != "страны мира" }
         val rows = all.take(30).map { listOf(it.title, it.source.ifBlank { "—" }) }
         val table = JSONObject().put("type", "table").put("title", "База знаний: ${all.size}").put("columns", JSONArray(listOf("Запись", "Откуда")))
             .put("rows", JSONArray(rows.map { JSONArray(it) }))
@@ -100,12 +111,16 @@ object OfflineBrain {
         skillCache?.let { return it }
         val dir = skillsDir(context)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean("skills_seeded", false)) {
-            Skill.parseList(asset(context, "brain/skills.json")).forEach { s ->
-                val f = File(dir, Skill.fileName(s.name)); if (!f.exists()) f.writeText(s.toJson().toString(2))
-            }
-            prefs.edit().putBoolean("skills_seeded", true).apply()
+        // Встроенные навыки досеваются при обновлениях: новые появляются, а удалённые пользователем не возвращаются
+        val seeded = prefs.getStringSet("skills_seeded_names", null)?.toMutableSet()
+            ?: if (prefs.getBoolean("skills_seeded", false)) mutableSetOf("Доброе утро", "Я дома", "Ухожу", "Спокойной ночи", "Кино", "Тренировка", "За рулём", "Экономия", "Работа") else mutableSetOf()
+        var changed = false
+        Skill.parseList(asset(context, "brain/skills.json")).forEach { s ->
+            if (s.name in seeded) return@forEach
+            val f = File(dir, Skill.fileName(s.name)); if (!f.exists()) f.writeText(s.toJson().toString(2))
+            seeded += s.name; changed = true
         }
+        if (changed) prefs.edit().putStringSet("skills_seeded_names", seeded).putBoolean("skills_seeded", true).apply()
         val list = dir.listFiles { f -> f.isFile && f.extension.equals("json", true) }.orEmpty()
             .flatMap { f -> try { Skill.parseList(f.readText()) } catch (e: Exception) { emptyList() } }
             .sortedBy { it.name.lowercase() }
@@ -151,6 +166,8 @@ object OfflineBrain {
         model?.let { return it }
         val ex = ArrayList<Pair<String, String>>()
         ex += IntentModel.parseTsv(asset(context, "brain/intents.tsv"))
+        // Открытый набор MASSIVE (Amazon, CC BY 4.0): русские фразы голосовым помощникам — и примеры, и «не-команды»
+        ex += IntentModel.parseTsv(asset(context, "brain/massive_ru.tsv"))
         try { userIntentsFile(context).takeIf { it.exists() }?.let { ex += IntentModel.parseTsv(it.readText()) } } catch (_: Exception) {}
         skills(context).filter { it.enabled }.forEach { s -> (s.triggers + s.name).forEach { ex += ("skill:" + s.name) to it } }
         ex += learnedExamples
@@ -166,7 +183,7 @@ object OfflineBrain {
 
     fun stats(context: Context): String {
         val m = model(context)
-        return "Понималка: ${m.intents} команд, ${m.size} примеров. База знаний: ${facts(context).size} записей. Навыков: ${skills(context).size}."
+        return "Понималка: ${m.intents - 1} команд, ${m.size} примеров. База знаний: ${facts(context).size} записей. Навыков: ${skills(context).size}."
     }
 
     /**
@@ -175,6 +192,7 @@ object OfflineBrain {
      */
     suspend fun train(context: Context, client: GroqClient, extraCanonicals: List<String> = emptyList()): String {
         val canon = (IntentModel.parseTsv(asset(context, "brain/intents.tsv")).map { it.first }.distinct() + extraCanonicals).distinct()
+            .filter { it != IntentModel.NONE }
         val existing = LinkedHashMap<String, MutableList<String>>()
         try { IntentModel.parseTsv(userIntentsFile(context).takeIf { it.exists() }?.readText().orEmpty()).forEach { (c, t) -> if (t != c) existing.getOrPut(c) { ArrayList() }.add(t) } } catch (_: Exception) {}
         var added = 0

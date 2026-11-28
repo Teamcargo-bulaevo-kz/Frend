@@ -1,0 +1,11 @@
+<!doctype html><html><head><title>Крестики-нолики</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style><style>#b{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}#b button{height:90px;font-size:44px;margin:0}</style></head><body><h1>Крестики-нолики</h1>
+<div id="s" class="dim">Ты — ✕, телефон — ◯</div><div id="b"></div><button class="p" style="width:100%" onclick="reset()">Новая игра</button>
+<script>
+let B,over;const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const win=(p)=>W.some(l=>l.every(i=>B[i]===p));const free=()=>B.map((v,i)=>v?null:i).filter(i=>i!==null);
+function best(){for(const p of ['◯','✕'])for(const i of free()){B[i]=p;const w=win(p);B[i]='';if(w)return i}if(!B[4])return 4;const c=[0,2,6,8].filter(i=>!B[i]);const f=c.length?c:free();return f[Math.floor(Math.random()*f.length)]}
+function draw(){b.innerHTML='';B.forEach((v,i)=>{const e=document.createElement('button');e.textContent=v;e.onclick=()=>move(i);b.appendChild(e)})}
+function end(t){over=true;s.textContent=t}
+function move(i){if(over||B[i])return;B[i]='✕';if(win('✕')){draw();return end('Ты выиграл! 🎉')}if(!free().length){draw();return end('Ничья')}B[best()]='◯';draw();if(win('◯'))end('Телефон выиграл');else if(!free().length)end('Ничья')}
+function reset(){B=Array(9).fill('');over=false;s.textContent='Ты — ✕, телефон — ◯';draw()}reset();
+</script></body></html>

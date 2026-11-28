@@ -1,0 +1,9 @@
+<!doctype html><html><head><title>Список покупок</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Список покупок</h1>
+<div class="row"><input id="i" placeholder="Что купить"><button class="p" id="add" style="flex:0 0 auto">+</button></div><div id="l"></div><button id="clr">Убрать купленное</button>
+<script>
+let L;try{L=JSON.parse(localStorage.getItem('list'))||[]}catch(_){L=[]}
+const save=()=>{try{localStorage.setItem('list',JSON.stringify(L))}catch(_){}};
+function draw(){l.innerHTML='';L.forEach((x,k)=>{const d=document.createElement('div');d.className='card';d.style.cssText='padding:10px;'+(x.d?'opacity:.45;text-decoration:line-through':'');d.textContent=(x.d?'✓ ':'○ ')+x.t;d.onclick=()=>{x.d=!x.d;save();draw()};l.appendChild(d)})}
+add.onclick=()=>{i.value.split(',').map(s=>s.trim()).filter(Boolean).forEach(t=>L.push({t,d:false}));i.value='';save();draw()};
+i.onkeydown=e=>{if(e.key==='Enter')add.onclick()};clr.onclick=()=>{L=L.filter(x=>!x.d);save();draw()};draw();
+</script></body></html>

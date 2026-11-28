@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>Конвертер валют</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Конвертер валют</h1>
+<p class="dim">Работает без интернета: курсы вводишь сам (или спроси ассистента «какой курс доллара») — они запоминаются.</p>
+<input id="v" type="number" value="100" inputmode="decimal"><div class="row"><select id="a"></select><select id="b"></select></div><div id="r" class="big"></div>
+<div class="card"><div class="dim">Курс к тенге (сколько ₸ за 1 единицу)</div><div id="rates"></div></div>
+<script>
+const def={'₸ тенге':1,'₽ рубль':5.5,'$ доллар':500,'€ евро':540,'¥ юань':70};let R;try{R=JSON.parse(localStorage.getItem('rates'))||def}catch(_){R=def}
+const a=document.getElementById('a'),b=document.getElementById('b'),v=document.getElementById('v'),r=document.getElementById('r'),box=document.getElementById('rates');
+Object.keys(R).forEach(k=>{a.add(new Option(k,k));b.add(new Option(k,k));if(k!=='₸ тенге'){const i=document.createElement('input');i.type='number';i.value=R[k];i.placeholder=k;i.oninput=()=>{R[k]=parseFloat(i.value)||R[k];try{localStorage.setItem('rates',JSON.stringify(R))}catch(_){};go()};const l=document.createElement('div');l.className='dim';l.textContent=k;box.appendChild(l);box.appendChild(i)}});
+a.selectedIndex=2;b.selectedIndex=0;
+function go(){const x=parseFloat(v.value)||0;r.textContent=(+(x*R[a.value]/R[b.value]).toFixed(2)).toLocaleString('ru')+' '+b.value.split(' ')[0]}
+[a,b,v].forEach(el=>el.oninput=go);go();
+</script></body></html>

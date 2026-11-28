@@ -1,0 +1,11 @@
+<!doctype html><html><head><title>Конвертер величин</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Конвертер величин</h1>
+<select id="t"></select><input id="v" type="number" value="1" inputmode="decimal"><div class="row"><select id="a"></select><select id="b"></select></div><div id="r" class="big"></div>
+<script>
+const U={'Длина':{'мм':.001,'см':.01,'м':1,'км':1000,'дюйм':.0254,'фут':.3048,'миля':1609.344},'Вес':{'г':.001,'кг':1,'т':1000,'фунт':.45359237,'унция':.0283495},'Объём':{'мл':.001,'л':1,'м³':1000,'галлон':3.78541},'Площадь':{'м²':1,'сотка':100,'гектар':10000,'км²':1e6},'Скорость':{'км/ч':1,'м/с':3.6,'миль/ч':1.609344,'узел':1.852},'Данные':{'КБ':1/1024,'МБ':1,'ГБ':1024,'ТБ':1048576},'Температура':{'°C':0,'°F':0,'K':0}};
+const t=document.getElementById('t'),a=document.getElementById('a'),b=document.getElementById('b'),v=document.getElementById('v'),r=document.getElementById('r');
+Object.keys(U).forEach(k=>t.add(new Option(k,k)));
+function fill(){a.innerHTML='';b.innerHTML='';Object.keys(U[t.value]).forEach((u,i)=>{a.add(new Option(u,u));b.add(new Option(u,u))});b.selectedIndex=1;go()}
+function temp(x,f,to){let c=f==='°C'?x:f==='°F'?(x-32)*5/9:x-273.15;return to==='°C'?c:to==='°F'?c*9/5+32:c+273.15}
+function go(){const x=parseFloat(String(v.value).replace(',','.'))||0;const y=t.value==='Температура'?temp(x,a.value,b.value):x*U[t.value][a.value]/U[t.value][b.value];r.textContent=(+y.toFixed(6)).toLocaleString('ru')+' '+b.value}
+t.onchange=fill;[a,b,v].forEach(el=>el.oninput=go);fill();
+</script></body></html>

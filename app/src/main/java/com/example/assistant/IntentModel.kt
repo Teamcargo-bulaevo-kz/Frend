@@ -42,6 +42,8 @@ class IntentModel(examples: List<Pair<String, String>>) {
         val all = rank(text)
         val best = all.firstOrNull() ?: return null
         val second = all.drop(1).firstOrNull { it.canonical != best.canonical }?.score ?: 0.0
+        // Фраза ближе всего к «не-командам» (вопросы, погода, новости из набора MASSIVE) — это не команда телефона
+        if (best.canonical == NONE) return null
         val m = best.copy(margin = best.score - second)
         return m.takeIf { it.score >= minScore && it.margin >= minMargin }
     }
@@ -64,6 +66,8 @@ class IntentModel(examples: List<Pair<String, String>>) {
     }
 
     companion object {
+        /** Класс «не команда»: примеры вопросов и бесед, чтобы понималка не принимала их за команды. */
+        const val NONE = "~нет"
         const val MIN_SCORE = 0.58
         const val MIN_MARGIN = 0.07
 

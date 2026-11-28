@@ -1,0 +1,15 @@
+<!doctype html><html><head><title>Секундомер и таймер</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Секундомер</h1>
+<div id="sw" class="big">00:00.0</div><div class="row"><button class="p" id="ss">Старт</button><button id="lap">Круг</button><button id="rs">Сброс</button></div><div id="laps" class="dim"></div>
+<h1 style="margin-top:24px">Таймер</h1><div class="row"><input id="m" type="number" value="5" placeholder="мин"><input id="s" type="number" value="0" placeholder="сек"></div>
+<div id="tm" class="big">05:00</div><div class="row"><button class="p" id="ts">Старт</button><button id="tr">Сброс</button></div>
+<script>
+const f=ms=>{const t=Math.max(0,ms),m=Math.floor(t/60000),s=Math.floor(t/1000)%60;return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')};
+let st=0,acc=0,run=false,n=0;const sw=document.getElementById('sw');
+setInterval(()=>{if(run){const t=acc+Date.now()-st;sw.textContent=f(t)+'.'+Math.floor(t/100)%10}},50);
+ss.onclick=()=>{if(run){acc+=Date.now()-st;run=false;ss.textContent='Старт'}else{st=Date.now();run=true;ss.textContent='Пауза'}};
+lap.onclick=()=>{if(run)laps.innerHTML='Круг '+(++n)+': '+sw.textContent+'<br>'+laps.innerHTML};
+rs.onclick=()=>{run=false;acc=0;n=0;sw.textContent='00:00.0';laps.innerHTML='';ss.textContent='Старт'};
+let end=0,tid=0;function beep(){try{const c=new AudioContext();[0,.4,.8].forEach(d=>{const o=c.createOscillator();o.frequency.value=880;o.connect(c.destination);o.start(c.currentTime+d);o.stop(c.currentTime+d+.25)})}catch(_){}}
+ts.onclick=()=>{if(tid){clearInterval(tid);tid=0;ts.textContent='Старт';return}end=Date.now()+((+m.value||0)*60+(+s.value||0))*1000;ts.textContent='Стоп';tid=setInterval(()=>{const l=end-Date.now();tm.textContent=f(l);if(l<=0){clearInterval(tid);tid=0;ts.textContent='Старт';tm.textContent='Время!';beep();if(navigator.vibrate)navigator.vibrate([300,200,300])}},200)};
+tr.onclick=()=>{clearInterval(tid);tid=0;ts.textContent='Старт';tm.textContent=f(((+m.value||0)*60+(+s.value||0))*1000)};
+</script></body></html>

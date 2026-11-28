@@ -1,0 +1,11 @@
+<!doctype html><html><head><title>Калькулятор</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Калькулятор</h1>
+<div class="card"><div id="e" class="dim" style="min-height:22px;text-align:right"></div><div id="d" class="big" style="text-align:right">0</div></div>
+<div id="k"></div>
+<script>
+let s='';const d=document.getElementById('d'),e=document.getElementById('e');
+const keys=[['C','(',')','÷'],['7','8','9','×'],['4','5','6','−'],['1','2','3','+'],['%','0',',','=']];
+const k=document.getElementById('k');
+keys.forEach(r=>{const row=document.createElement('div');row.className='row';r.forEach(t=>{const b=document.createElement('button');b.textContent=t;if('÷×−+='.includes(t))b.className='p';b.onclick=()=>press(t);row.appendChild(b)});k.appendChild(row)});
+function calc(x){x=x.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/,/g,'.').replace(/(\d+(\.\d+)?)%/g,'($1/100)');if(!/^[\d+\-*/().\s]*$/.test(x))return 'ошибка';try{const v=Function('return ('+x+')')();return Number.isFinite(v)?String(+v.toFixed(10)).replace('.',','):'ошибка'}catch(_){return 'ошибка'}}
+function press(t){if(t==='C'){s='';e.textContent=''}else if(t==='='){e.textContent=s+' =';s=calc(s);if(s==='ошибка'){d.textContent=s;s='';return}}else s+=t;d.textContent=s||'0'}
+</script></body></html>

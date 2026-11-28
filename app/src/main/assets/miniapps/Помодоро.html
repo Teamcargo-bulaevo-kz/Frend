@@ -1,0 +1,11 @@
+<!doctype html><html><head><title>Помодоро</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#171A2B;color:#F1F2F8;margin:0;padding:16px;font-size:17px}h1{font-size:20px;margin:4px 0 14px}button{font-size:18px;padding:12px;border-radius:12px;border:0;margin:4px;background:#2A2F48;color:#fff}button.p{background:#7C6CFF}input,select{font-size:18px;padding:10px;border-radius:10px;border:0;margin:4px 0;background:#22263A;color:#fff;width:100%}.card{background:#22263A;border-radius:14px;padding:14px;margin:10px 0}.big{font-size:40px;font-weight:bold;text-align:center;margin:10px 0}.row{display:flex;gap:8px}.row>*{flex:1}.dim{color:#9EA3BC;font-size:14px}</style></head><body><h1>Помодоро: работа и отдых</h1>
+<div id="ph" class="dim" style="text-align:center">Работа</div><div id="t" class="big" style="font-size:64px">25:00</div>
+<div class="row"><button class="p" id="go">Старт</button><button id="sk">Пропустить</button></div>
+<div class="row"><input id="w" type="number" value="25"><input id="r" type="number" value="5"></div><p class="dim">Минуты работы и отдыха. Сделано помидоров: <b id="n">0</b></p>
+<script>
+let work=true,left=25*60,tid=0,n=0;const show=()=>{t.textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');ph.textContent=work?'Работа':'Отдых'};
+function beep(){try{const c=new AudioContext();const o=c.createOscillator();o.frequency.value=660;o.connect(c.destination);o.start();o.stop(c.currentTime+.6)}catch(_){};if(navigator.vibrate)navigator.vibrate(500)}
+function next(){if(work){n++;document.getElementById('n').textContent=n}work=!work;left=(work?+w.value:+r.value)*60;beep();show()}
+go.onclick=()=>{if(tid){clearInterval(tid);tid=0;go.textContent='Старт'}else{go.textContent='Пауза';tid=setInterval(()=>{left--;if(left<=0)next();show()},1000)}};
+sk.onclick=next;w.oninput=r.oninput=()=>{if(!tid){left=(work?+w.value:+r.value)*60;show()}};show();
+</script></body></html>

@@ -52,21 +52,36 @@ button{background:#7C6CFF;color:#fff}input,select{background:#22263A;color:#fff}
         return File(dir(context), f).also { it.writeText(html) }
     }
 
+    /** Встроенные мини-приложения (assets/miniapps): калькулятор, конвертеры, таймеры, пароли, жребий, список покупок… */
+    fun builtIn(context: Context): List<String> = try {
+        context.assets.list("miniapps").orEmpty().filter { it.endsWith(".html") }.map { it.removeSuffix(".html") }.sorted()
+    } catch (e: Exception) { emptyList() }
+
+    fun openBuiltIn(context: Context, name: String) {
+        val html = try { context.assets.open("miniapps/$name.html").bufferedReader().use { it.readText() } } catch (e: Exception) { return }
+        context.startActivity(Intent(context, SandboxActivity::class.java).putExtra(SandboxActivity.EXTRA_HTML, html)
+            .putExtra(SandboxActivity.EXTRA_BUILTIN, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     fun list(context: Context): List<File> =
         dir(context).listFiles { f -> f.isFile && f.extension.equals("html", true) }.orEmpty().sortedByDescending { it.lastModified() }
 
     /** «Открой мини-приложение калькулятор» / «мои мини-приложения». */
     fun command(context: Context, name: String?): String {
-        val all = list(context)
-        if (all.isEmpty()) return "Сохранённых мини-приложений пока нет. Попроси: «сделай калькулятор ипотеки» — и нажми «Сохранить» в нём."
+        val saved = list(context)
+        val built = builtIn(context)
         if (name.isNullOrBlank()) {
             context.startActivity(Intent(context, SandboxActivity::class.java).putExtra(SandboxActivity.EXTRA_LIST, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            return "Мои мини-приложения: ${all.size}. " + all.take(8).joinToString(", ") { it.nameWithoutExtension }
+            return "Встроенные: ${built.joinToString(", ")}." + if (saved.isNotEmpty()) " Твои: ${saved.take(8).joinToString(", ") { it.nameWithoutExtension }}." else ""
         }
         val key = TextMatch.normalize(name)
-        val f = all.firstOrNull { TextMatch.normalize(it.nameWithoutExtension).contains(key) }
-            ?: all.maxByOrNull { TextMatch.similarity(TextMatch.normalize(it.nameWithoutExtension), key) }!!
-        openFile(context, f)
-        return "Открываю «${f.nameWithoutExtension}»"
+        fun score(title: String): Double { val t = TextMatch.normalize(title); return if (t.contains(key) || key.contains(t)) 1.0 else TextMatch.similarity(t, key) }
+        val bestBuilt = built.maxByOrNull { score(it) }
+        val bestSaved = saved.maxByOrNull { score(it.nameWithoutExtension) }
+        val sb = bestBuilt?.let { score(it) } ?: 0.0
+        val ss = bestSaved?.let { score(it.nameWithoutExtension) } ?: 0.0
+        if (maxOf(sb, ss) < 0.5) return "Нет мини-приложения «$name». Есть: ${built.joinToString(", ")}. Или попроси: «сделай $name»."
+        return if (ss > sb && bestSaved != null) { openFile(context, bestSaved); "Открываю «${bestSaved.nameWithoutExtension}»" }
+        else { openBuiltIn(context, bestBuilt!!); "Открываю «$bestBuilt»" }
     }
 }

@@ -25,6 +25,7 @@ class SandboxActivity : AppCompatActivity() {
         const val EXTRA_HTML = "html"
         const val EXTRA_FILE = "file"
         const val EXTRA_LIST = "list"
+        const val EXTRA_BUILTIN = "builtin"
     }
 
     private var html = ""
@@ -44,7 +45,7 @@ class SandboxActivity : AppCompatActivity() {
         }
         bar.addView(TextView(this).apply { text = title; setTextColor(VisualView.TEXT); textSize = 16f; setPadding(12, 18, 12, 18) },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        if (intent.getStringExtra(EXTRA_FILE) == null) bar.addView(button("Сохранить") {
+        if (intent.getStringExtra(EXTRA_FILE) == null && !intent.getBooleanExtra(EXTRA_BUILTIN, false)) bar.addView(button("Сохранить") {
             val f = MiniApps.save(this, html); Toast.makeText(this, "Сохранено: ${f.name}", Toast.LENGTH_SHORT).show()
         })
         bar.addView(button("Поделиться") {
@@ -72,21 +73,26 @@ class SandboxActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = true
         }
         w.setBackgroundColor(VisualView.BG)
-        w.loadDataWithBaseURL("about:blank", html, "text/html", "utf-8", null)
+        // Свой «адрес» у каждого мини-приложения: так оно может запоминать данные (список покупок, курсы),
+        // а запросы в сеть по-прежнему перехватываются и не уходят
+        val origin = "https://app.local/" + android.net.Uri.encode(MiniApps.title(html)) + "/"
+        w.loadDataWithBaseURL(origin, html, "text/html", "utf-8", null)
         root.addView(w, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
     }
 
     private fun showList() {
         val files = MiniApps.list(this)
-        title = "Мои мини-приложения"
+        val built = MiniApps.builtIn(this)
+        title = "Мини-приложения"
         val list = ListView(this)
         list.setBackgroundColor(VisualView.BG)
-        list.adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, files.map { it.nameWithoutExtension }) {
+        val labels = built.map { "★ $it" } + files.map { it.nameWithoutExtension }
+        list.adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, labels) {
             override fun getView(position: Int, convertView: android.view.View?, parent: ViewGroup): android.view.View =
                 (super.getView(position, convertView, parent) as TextView).apply { setTextColor(VisualView.TEXT) }
         }
-        list.setOnItemClickListener { _, _, i, _ -> MiniApps.openFile(this, files[i]) }
+        list.setOnItemClickListener { _, _, i, _ -> if (i < built.size) MiniApps.openBuiltIn(this, built[i]) else MiniApps.openFile(this, files[i - built.size]) }
         setContentView(list)
     }
 

@@ -13,7 +13,8 @@ class OfflineBrainTest {
 
     private val now: Calendar = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 14); set(Calendar.MINUTE, 35) }
     private val intents = IntentModel.parseTsv(File("src/main/assets/brain/intents.tsv").readText())
-    private val model = IntentModel(intents)
+    private val massive = IntentModel.parseTsv(File("src/main/assets/brain/massive_ru.tsv").readText())
+    private val model = IntentModel(intents + massive)
 
     @Test fun everyPreinstalledCommandIsUnderstoodByRules() {
         val canon = intents.map { it.first }.distinct()
@@ -36,7 +37,17 @@ class OfflineBrainTest {
         assertEquals("громкость на {n}", c("звук на 40"))
         assertEquals("громкость на 40", IntentModel.fill("громкость на {n}", "звук на сорок"))
         assertNull(IntentModel.fill("громкость на {n}", "звук на"))
-        assertEquals("что на экране", c("что тут у меня"))
+        assertEquals("что на экране", c("глянь что на экране"))
+    }
+
+    @Test fun massiveSubset() {
+        assertTrue(massive.count { it.first == IntentModel.NONE } > 500)
+        // Позитивные примеры из MASSIVE ведут в команды, которые понимают правила
+        val canon = massive.map { it.first }.distinct().filter { it != IntentModel.NONE }
+        assertTrue(canon.all { LocalCommands.parse(it, now) != null })
+        // Вопросы из набора «не-команд» не превращаются в команды
+        assertNull(model.predict("какая погода будет завтра"))
+        assertNull(model.predict("расскажи последние новости"))
     }
 
     @Test fun questionsAreNotCommands() {
@@ -68,6 +79,12 @@ class OfflineBrainTest {
         val mine = facts + Fact(99, "код домофона", "код домофона 4512")
         assertTrue(KnowledgeRank.answer(KnowledgeRank.search("какой код домофона", mine)).contains("4512"))
         assertTrue(KnowledgeRank.search("квантовая хромодинамика", facts).isEmpty())
+        val countries = File("src/main/assets/brain/countries.tsv").readLines().filter { it.contains('\t') && !it.startsWith("#") }
+            .mapIndexed { i, l -> Fact(1000L + i, l.substringBefore('\t'), l.substringAfter('\t')) }
+        assertTrue(countries.size > 200)
+        val all = facts + countries
+        assertTrue(KnowledgeRank.search("какой код у турции", all).first().fact.body.contains("+90"))
+        assertTrue(KnowledgeRank.search("какая валюта в грузии", all).first().fact.body.contains("GEL"))
     }
 
     @Test fun brainPhrases() {
