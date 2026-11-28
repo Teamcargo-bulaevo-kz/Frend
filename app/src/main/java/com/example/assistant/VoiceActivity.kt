@@ -70,7 +70,7 @@ class VoiceActivity : ComponentActivity() {
     private fun execute(text: String) {
         val app = applicationContext
         AssistantRunner.process(app, text) { answer ->
-            Toast.makeText(app, answer.take(300), Toast.LENGTH_LONG).show()
+            Toast.makeText(app, VisualSpec.plain(answer).take(300), Toast.LENGTH_LONG).show()
             AssistantService.showResult(app, text, answer)
             finish()
         }

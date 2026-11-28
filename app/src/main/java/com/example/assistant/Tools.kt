@@ -321,6 +321,22 @@ object Tools {
                 listOf("section")
             ))
             put(tool(
+                "update_plan",
+                "План сложной просьбы из нескольких шагов: в начале — все шаги, потом обновляй done (сколько сделано). Для простых просьб не вызывай.",
+                listOf(
+                    "steps" to list("Шаги по порядку, коротко"),
+                    "done" to number("Сколько шагов уже выполнено")
+                ),
+                listOf("steps")
+            ))
+            put(tool(
+                "screen_guide",
+                "Показывает пользователю на экране по шагам, как сделать что-то в телефоне (обводит нужную кнопку, говорит, что нажать). " +
+                    "auto=true — «сделай сам»: нажимает за пользователя (опасное — удалить, оплатить, отправить — не нажимает).",
+                listOf("goal" to text("Что нужно сделать, например «включить NFC»"), "auto" to flag("true — сделать самому")),
+                listOf("goal")
+            ))
+            put(tool(
                 "screen_control",
                 "Управляет телефоном вместо пальцев: back — назад, home — домой, recents — недавние, notifications — уведомления, quick_settings — шторка, lock — заблокировать экран, power — меню питания, screenshot — скриншот, split — разделить экран, click — нажать кнопку/пункт по названию text, scroll — пролистать (direction up/down/left/right), type — ввести text в поле ввода.",
                 listOf(
@@ -475,13 +491,14 @@ object Tools {
         "profile" to listOf("set_profile"),
         "system" to listOf("quick_setting", "set_brightness"),
         "device" to listOf("device_info", "read_screen", "notifications", "grant_permissions"),
-        "screen" to listOf("screen_control", "screen_translate", "live_screen", "read_screen", "close_app"),
+        "screen" to listOf("screen_control", "screen_translate", "live_screen", "read_screen", "close_app", "screen_guide"),
         "filesort" to listOf("files")
     )
 
     /** Признаки (начала слов) в тексте, по которым понятно, какие функции могут понадобиться. */
     private val groupKeys: Map<String, List<String>> = mapOf(
         "screen" to listOf(
+            "покажи как", "покажи где", "научи", "проведи", "сделай сам", "сделай за меня",
             "экран", "нажми", "кликни", "тапни", "прокрут", "пролист", "листай", "назад", "домой", "недавн", "заблокир",
             "введи", "напечатай", "переведи", "перевод", "живой", "закрой", "останови", "скриншот", "шторк"
         ),
@@ -544,9 +561,9 @@ object Tools {
         return groupKeys.filter { (_, keys) -> words.any { w -> keys.any { w.startsWith(it) } } }.keys
     }
 
-    /** Только функции из указанных групп (с полными описаниями). */
-    fun subset(groupNames: Set<String>): JSONArray {
-        val names = groupNames.flatMap { groups[it].orEmpty() }.toSet()
+    /** Только функции из указанных групп (с полными описаниями). plan — добавить update_plan для сложных просьб. */
+    fun subset(groupNames: Set<String>, plan: Boolean = false): JSONArray {
+        val names = groupNames.flatMap { groups[it].orEmpty() }.toSet() + if (plan) setOf("update_plan") else emptySet()
         return JSONArray().apply { byName.forEach { (name, tool) -> if (name in names) put(tool) } }
     }
 

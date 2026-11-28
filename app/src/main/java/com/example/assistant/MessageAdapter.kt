@@ -103,7 +103,7 @@ class MessageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
         holder.content.removeAllViews()
         val segments = MessageParser.split(m.text)
-        val hasCode = segments.any { it is Segment.Code }
+        val hasCode = segments.any { it is Segment.Code }  // код, схемы и мини-приложения — на всю ширину
         holder.bubble.layoutParams.width = if (hasCode) maxWidth else ViewGroup.LayoutParams.WRAP_CONTENT
         holder.content.layoutParams.width = if (hasCode) maxWidth - pad else ViewGroup.LayoutParams.WRAP_CONTENT
 
@@ -112,10 +112,33 @@ class MessageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             when (seg) {
                 is Segment.Text -> holder.content.addView(textView(context, seg.text, textColor, maxWidth - pad))
                 is Segment.Code -> {
+                    // Наглядный блок: рисуем сами; если JSON не разобрался — показываем как код
+                    val visual = if (seg.lang in VisualSpec.langs || (seg.lang.isEmpty() && seg.code.trimStart().startsWith("{\"type\""))) VisualSpec.parse(seg.code) else null
+                    if (visual != null) {
+                        val view = VisualView(context, visual).apply {
+                            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 8; bottomMargin = 8 }
+                            setOnClickListener { VisualDialog.show(context, visual) }
+                            setOnLongClickListener { VisualDialog.save(context, visual); true }
+                        }
+                        holder.content.addView(view)
+                        continue
+                    }
                     val box = inflater.inflate(R.layout.item_code, holder.content, false)
                     box.findViewById<TextView>(R.id.codeLang).text = seg.lang.ifEmpty { "текст" }
                     box.findViewById<TextView>(R.id.codeText).text = seg.code
                     box.findViewById<TextView>(R.id.codeCopy).setOnClickListener { copy(context, seg.code, "Скопировано") }
+                    // Мини-приложение: кнопка «Открыть» запускает его в закрытой песочнице
+                    if (MiniApps.isApp(seg.lang, seg.code)) {
+                        val head = box.findViewById<TextView>(R.id.codeCopy).parent as LinearLayout
+                        head.addView(TextView(context).apply {
+                            text = "▶ Открыть"
+                            setTextColor(0xFFB9B0FF.toInt())
+                            textSize = 13f
+                            setPadding(24, 18, 24, 18)
+                            setOnClickListener { MiniApps.open(context, seg.code) }
+                        }, 1)
+                        box.findViewById<TextView>(R.id.codeLang).text = "мини-приложение"
+                    }
                     holder.content.addView(box)
                 }
             }

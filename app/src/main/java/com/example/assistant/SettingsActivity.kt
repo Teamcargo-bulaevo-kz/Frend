@@ -312,6 +312,24 @@ class SettingsActivity : AppCompatActivity() {
         addAction("Консоль (Shizuku)", "Процессы, выдача разрешений, переключатели без шторки. Статус: ${ShizukuShell.state(this).text}") {
             showShizuku()
         }
+        addAction("Отчёт для разработчика", "Собрать диагностику (без переписок, контактов и файлов) и отправить — для разбора проблем") {
+            Thread { val r = DevReport.share(this); runOnUiThread { Toast.makeText(this, r, Toast.LENGTH_LONG).show() } }.start()
+        }
+        addAction("Выученные команды", "Фразы, которые ассистент выполняет без модели и интернета. Голосом: «чему ты научился», «забудь фразу …»") {
+            Thread {
+                val dao = NoteDatabase.getInstance(this).commandPatternDao()
+                val list = kotlinx.coroutines.runBlocking { dao.top(200) }
+                runOnUiThread {
+                    val text = if (list.isEmpty()) "Пока ничего не выучено." else list.joinToString("\n") { p ->
+                        "• " + p.phrase.removePrefix(Learning.TEMPLATE_PREFIX).replace("#", "N") + " → " +
+                            when (p.functionName) { Learning.TAUGHT -> "твоя связка"; Learning.MACRO -> "связка"; else -> p.functionName } + " (${p.useCount})"
+                    }
+                    androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Выучено: ${list.size}").setMessage(text)
+                        .setPositiveButton("Ок", null)
+                        .setNegativeButton("Забыть всё") { _, _ -> Thread { kotlinx.coroutines.runBlocking { dao.deleteAll() } }.start() }.show()
+                }
+            }.start()
+        }
         addAction("Проверить переключатели", "Почему ассистент не может включить или выключить Wi-Fi, интернет, Bluetooth: Shizuku, службы, разрешения") {
             Thread {
                 val report = try { SystemToggle.diagnose(this) } catch (e: Exception) { "Ошибка: ${e.message}" }

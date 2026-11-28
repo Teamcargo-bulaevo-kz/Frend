@@ -225,13 +225,102 @@ object ScreenOverlay {
         bubble = null
     }
 
+    // ---------------------------------------------------------------- подсказки «покажи как»
+
+    private var guideLayer: View? = null
+    private var guideCard: View? = null
+
+    /** Рамка со стрелкой вокруг нужной кнопки. Касания проходят сквозь неё к приложению. */
+    private class Highlight(context: Context, val target: Rect) : View(context) {
+        private val d = context.resources.displayMetrics.density
+        private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val loc = IntArray(2)
+        private var phase = 0f
+        override fun onDraw(c: android.graphics.Canvas) {
+            getLocationOnScreen(loc)
+            val r = android.graphics.RectF(target).apply { offset(-loc[0].toFloat(), -loc[1].toFloat()); inset(-6 * d, -6 * d) }
+            // Затемняем всё, кроме нужного места
+            p.style = android.graphics.Paint.Style.FILL; p.color = Color.argb(90, 0, 0, 0)
+            c.drawRect(0f, 0f, width.toFloat(), r.top, p); c.drawRect(0f, r.bottom, width.toFloat(), height.toFloat(), p)
+            c.drawRect(0f, r.top, r.left, r.bottom, p); c.drawRect(r.right, r.top, width.toFloat(), r.bottom, p)
+            // Пульсирующая рамка
+            phase = (phase + 0.06f) % 1f
+            p.style = android.graphics.Paint.Style.STROKE; p.strokeWidth = 3 * d
+            p.color = Color.argb((255 * (1 - phase * 0.6f)).toInt(), 255, 209, 102)
+            val grow = phase * 8 * d
+            c.drawRoundRect(android.graphics.RectF(r.left - grow, r.top - grow, r.right + grow, r.bottom + grow), 14 * d, 14 * d, p)
+            p.color = Color.rgb(255, 209, 102); p.strokeWidth = 3.5f * d
+            c.drawRoundRect(r, 12 * d, 12 * d, p)
+            // Стрелка к рамке: сверху, если кнопка внизу экрана, и снизу, если вверху
+            val fromAbove = r.centerY() > height / 2
+            val tipY = if (fromAbove) r.top - 6 * d else r.bottom + 6 * d
+            val tailY = if (fromAbove) tipY - 70 * d else tipY + 70 * d
+            val x = r.centerX()
+            p.strokeWidth = 5 * d
+            c.drawLine(x, tailY, x, tipY, p)
+            p.style = android.graphics.Paint.Style.FILL
+            val dir = if (fromAbove) -1 else 1
+            val path = android.graphics.Path().apply { moveTo(x, tipY); lineTo(x - 14 * d, tipY + dir * 20 * d); lineTo(x + 14 * d, tipY + dir * 20 * d); close() }
+            c.drawPath(path, p)
+            postInvalidateDelayed(40)
+        }
+    }
+
+    /** Подсказка шага: рамка вокруг [target] (если есть) и карточка с текстом и кнопками. */
+    fun showGuideCard(step: Int, text: String, target: Rect?, auto: Boolean, final: Boolean) {
+        val s = service() ?: return
+        removeGuide()
+        if (target != null) {
+            val layer = Highlight(s, target)
+            val p = params(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, touchable = false).apply {
+                flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            }
+            try { wm(s).addView(layer, p); guideLayer = layer } catch (_: Exception) {}
+        }
+        val box = LinearLayout(s).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(Color.argb(245, 24, 24, 38), dp(s, 18).toFloat())
+            setPadding(dp(s, 16), dp(s, 12), dp(s, 16), dp(s, 10))
+        }
+        box.addView(TextView(s).apply {
+            this.text = if (final) "Подсказка" else "Шаг $step"
+            setTextColor(Color.rgb(255, 209, 102)); textSize = 12f
+        })
+        box.addView(TextView(s).apply { this.text = text; setTextColor(Color.WHITE); textSize = 16f; setPadding(0, dp(s, 4), 0, dp(s, 6)) })
+        val buttons = LinearLayout(s).apply { orientation = LinearLayout.HORIZONTAL }
+        fun btn(label: String, action: () -> Unit) = TextView(s).apply {
+            this.text = label; setTextColor(Color.rgb(185, 176, 255)); textSize = 15f
+            setPadding(dp(s, 10), dp(s, 8), dp(s, 14), dp(s, 8)); setOnClickListener { action() }
+        }
+        if (!final) {
+            if (!auto) buttons.addView(btn("Сделай сам") { ScreenGuide.onDoIt() })
+            buttons.addView(btn("Стоп") { ScreenGuide.onStop() })
+        } else buttons.addView(btn("Закрыть") { removeGuide() })
+        box.addView(buttons)
+        val dm = s.resources.displayMetrics
+        // Карточка не должна закрывать нужную кнопку: если кнопка внизу — карточка сверху
+        val atTop = target != null && target.centerY() > dm.heightPixels * 0.55
+        val p = params(dm.widthPixels - dp(s, 24), WindowManager.LayoutParams.WRAP_CONTENT).apply {
+            gravity = (if (atTop) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL
+            y = dp(s, if (atTop) 48 else 64)
+        }
+        try { wm(s).addView(box, p); guideCard = box } catch (_: Exception) {}
+        if (final) handler.postDelayed({ if (guideCard === box) removeGuide() }, 20_000L)
+    }
+
+    fun removeGuide() {
+        val s = service()
+        listOfNotNull(guideLayer, guideCard).forEach { v -> s?.let { try { wm(it).removeView(v) } catch (_: Exception) {} } }
+        guideLayer = null; guideCard = null
+    }
+
     // ---------------------------------------------------------------- для снимка экрана
 
     private var hiddenViews: List<View> = emptyList()
 
     /** Прячет наши окна, чтобы они не попали на снимок. true — было что прятать. */
     fun hideTemporarily(): Boolean {
-        val views = listOfNotNull(translation, card, bubble).filter { it.visibility == View.VISIBLE }
+        val views = listOfNotNull(translation, card, bubble, guideLayer, guideCard).filter { it.visibility == View.VISIBLE }
         views.forEach { it.visibility = View.INVISIBLE }
         hiddenViews = views
         return views.isNotEmpty()
@@ -243,6 +332,6 @@ object ScreenOverlay {
     }
 
     fun removeAll() {
-        removeTranslation(); removeCard(); removeBubble()
+        removeTranslation(); removeCard(); removeBubble(); removeGuide()
     }
 }

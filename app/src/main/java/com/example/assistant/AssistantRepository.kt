@@ -105,7 +105,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
         // «Живой экран»: вопрос о том, что видно, — сразу со снимком экрана модели со зрением
         if (ScreenAssist.live(context) && ScreenAssist.aboutScreen(prompt)) {
             val answer = ScreenAssist.ask(context, prompt)
-            withContext(Dispatchers.Main) { ScreenOverlay.showCard("Про экран", answer) }
+            withContext(Dispatchers.Main) { ScreenOverlay.showCard("Про экран", VisualSpec.plain(answer)) }
             return answer
         }
         // «Включи Imagine Dragons»: если такое есть в музыке телефона, модель не нужна
@@ -113,14 +113,8 @@ class AssistantRepository(private val context: Context, apiKey: String) {
             val known = withContext(Dispatchers.IO) { MusicLibrary.index(context).search(query, 1).isNotEmpty() }
             if (known) return execute("play_music", JSONObject().put("query", query).put("shuffle", false))
         }
-        // Уровень 1: фразы, которым ассистент уже научился у модели
-        val cached = patternDao.find(normalized)?.takeIf { it.functionName in cacheableFunctions }
-        if (cached != null) {
-            val args = try { JSONObject(cached.argumentsJson) } catch (e: Exception) { JSONObject() }
-            val result = execute(cached.functionName, args)
-            patternDao.upsert(cached.copy(useCount = cached.useCount + 1, lastUsed = System.currentTimeMillis()))
-            return result
-        }
+        // Уровень 1: фразы, шаблоны и связки, которым ассистент уже научился (у модели или у пользователя)
+        runLearned(normalized)?.let { return it }
 
         return try {
             val answer = try {
@@ -228,6 +222,7 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 put("role", "system")
                 put("content", client.systemPrompt())
             })
+            if (!commandMode || AssistantPrompt.wantsVisual(prompt)) put(JSONObject().put("role", "system").put("content", AssistantPrompt.VISUAL_NOTE))
             ChatHistory.summary(context)?.let { sum ->
                 put(JSONObject().apply {
                     put("role", "system")
@@ -245,55 +240,142 @@ class AssistantRepository(private val context: Context, apiKey: String) {
                 }
                 put(JSONObject().apply {
                     put("role", if (m.role == "assistant") "assistant" else "user")
-                    put("content", m.text)
+                    // Схемы и мини-приложения из прошлых ответов модели не нужны — экономим токены
+                    put("content", VisualSpec.stripForModel(m.text))
                 })
             }
         }
-        val tools = AppSettings.filterTools(context, if (commandMode) Tools.subset(groups) else Tools.compact)
+        val multi = AgentPlan.multiStep(prompt)
+        if (multi && messages.length() > 1) {
+            // Подсказка про план — системным сообщением перед последней репликой пользователя
+            val last = messages.getJSONObject(messages.length() - 1)
+            messages.put(messages.length() - 1, JSONObject().put("role", "system").put("content", AgentPlan.NOTE))
+            messages.put(last)
+        }
+        val tools = AppSettings.filterTools(context, if (commandMode) Tools.subset(groups, plan = multi) else Tools.compact)
 
         return when (val result = client.sendConversation(
             messages, tools,
             effort = if (commandMode) "low" else "medium",
-            maxTokens = if (commandMode) 1024 else 2048
+            maxTokens = if (AssistantPrompt.wantsVisual(prompt)) 5000 else if (commandMode) 1024 else 2048
         )) {
             is GroqResult.FinalText ->
                 if (Sanity.implausibleTemperature(result.text)) result.text + Sanity.WARNING else result.text
-            is GroqResult.FunctionCalls -> {
-                val outputs = result.calls.map { execute(it.name, it.arguments) }
+            is GroqResult.FunctionCalls -> runAgent(prompt, normalizedPhrase, messages, tools, result)
+        }
+    }
 
-                // Запоминаем фразу только если это было одно простое действие
-                val only = result.calls.singleOrNull()
-                if (only != null && only.name in cacheableFunctions) {
-                    patternDao.upsert(
-                        CommandPatternEntity(
-                            phrase = normalizedPhrase,
-                            functionName = only.name,
-                            argumentsJson = only.arguments.toString()
-                        )
-                    )
-                }
-                // Содержимое файлов и баз модель должна осмыслить (найти, посчитать, пересказать): второй короткий вызов
-                val needsAnalysis = result.calls.any {
-                    it.name == "shared_folder" && it.arguments.optString("action") in setOf("read", "sql")
-                }
-                if (needsAnalysis) {
-                    val followUp = JSONArray()
-                    for (i in 0 until messages.length()) followUp.put(messages.get(i))
-                    followUp.put(result.assistantMessage)
-                    result.calls.forEachIndexed { i, call ->
-                        followUp.put(JSONObject().apply {
-                            put("role", "tool")
-                            put("tool_call_id", call.id)
-                            put("content", outputs[i])
-                        })
-                    }
-                    val second = client.sendConversation(followUp, null, effort = "low", maxTokens = 1024)
-                    if (second is GroqResult.FinalText && second.text.isNotBlank()) return second.text
-                }
-                // Результат функций уже написан по-человечески: показываем его как есть
-                outputs.joinToString("\n")
+    // ---------------------------------------------------------------- несколько шагов подряд и план
+
+    /** Функции, которые только узнают что-то: их результат может понадобиться следующему шагу. */
+    private val infoTools = setOf(
+        "find_contact", "device_info", "web_search", "list_notes", "search_notes", "calendar_list", "list_reminders",
+        "find_files", "find_media", "music_library", "notifications", "read_screen", "shared_folder", "list_digests", "recognize_image"
+    )
+
+    /**
+     * Выполняет функции, которые вызвала модель. Если задача из нескольких шагов (есть план или результат нужен дальше),
+     * отдаёт результаты модели и продолжает — до 5 кругов, как агент. Простые команды — как раньше: один круг, без второго запроса.
+     */
+    private suspend fun runAgent(prompt: String, phrase: String, messages: JSONArray, tools: JSONArray, first: GroqResult.FunctionCalls): String {
+        var current = first
+        val convo = JSONArray().apply { for (i in 0 until messages.length()) put(messages.get(i)) }
+        val shown = ArrayList<String>()
+        var plan: List<String> = emptyList()
+        var planDone = 0
+        var final: String? = null
+        val multi = AgentPlan.multiStep(prompt)
+        for (round in 1..5) {
+            val outputs = current.calls.map { call ->
+                if (call.name == "update_plan") {
+                    AgentPlan.steps(call.arguments).takeIf { it.isNotEmpty() }?.let { plan = it }
+                    planDone = call.arguments.optInt("done", planDone).coerceIn(0, plan.size)
+                    "План принят. Выполняй шаги по порядку и обновляй план."
+                } else execute(call.name, call.arguments)
+            }
+            if (round == 1) learn(phrase, current.calls)
+            current.calls.forEachIndexed { i, c -> if (c.name != "update_plan") shown += outputs[i] }
+            // Ждём «да/нет» от пользователя — дальше не идём
+            if (asks.isNotEmpty()) break
+            val analysis = current.calls.any { it.name == "shared_folder" && it.arguments.optString("action") in setOf("read", "sql") }
+            val needMore = analysis || (plan.isNotEmpty() && planDone < plan.size) ||
+                (multi && current.calls.any { it.name in infoTools || it.name == "update_plan" })
+            if (!needMore) break
+            convo.put(current.assistantMessage)
+            current.calls.forEachIndexed { i, call ->
+                convo.put(JSONObject().put("role", "tool").put("tool_call_id", call.id).put("content", outputs[i].take(3000)))
+            }
+            val next = try { client.sendConversation(convo, tools, effort = "low", maxTokens = 1200) } catch (e: Exception) { break }
+            if (next is GroqResult.FinalText) { final = next.text.takeIf { it.isNotBlank() }; if (plan.isNotEmpty()) planDone = plan.size; break }
+            current = next as GroqResult.FunctionCalls
+        }
+        val text = final ?: shown.filter { it.isNotBlank() }.joinToString("\n")
+        return if (plan.size >= 2) text + AgentPlan.visual(plan, planDone) else text
+    }
+
+    /** Запоминаем: одно действие — фразу и шаблон с числами; несколько безопасных — связку. */
+    private suspend fun learn(phrase: String, calls: List<ToolCall>) {
+        val real = calls.filter { it.name != "update_plan" }
+        if (real.isEmpty() || !real.all { Learning.cacheable(it.name, it.arguments) }) return
+        if (real.size == 1) {
+            val c = real.first()
+            patternDao.upsert(CommandPatternEntity(phrase = phrase, functionName = c.name, argumentsJson = c.arguments.toString()))
+            val t = Learning.template(phrase)
+            val g = Learning.generalize(phrase, c.arguments)
+            if (t != null && g != null) patternDao.upsert(CommandPatternEntity(phrase = t, functionName = c.name, argumentsJson = g.toString()))
+        } else if (real.size <= 5) {
+            patternDao.upsert(CommandPatternEntity(phrase = phrase, functionName = Learning.MACRO, argumentsJson = Learning.macroJson(real.map { it.name to it.arguments })))
+        }
+    }
+
+    /** Выученное: точная фраза, шаблон с числами, похожая фраза, связка или то, чему научил пользователь. */
+    private suspend fun runLearned(phrase: String, depth: Int = 0): String? {
+        val hit = patternDao.find(phrase)
+            ?: Learning.template(phrase)?.let { patternDao.find(it) }
+            ?: patternDao.top(300).firstOrNull { !it.phrase.startsWith(Learning.TEMPLATE_PREFIX) && Learning.close(it.phrase, phrase) }
+            ?: return null
+        val result = when (hit.functionName) {
+            Learning.TAUGHT -> {
+                if (depth > 0) return null
+                val commands = try { JSONArray(hit.argumentsJson).let { a -> (0 until a.length()).map { a.optString(it) } } } catch (e: Exception) { return null }
+                commands.map { cmd ->
+                    val n = normalize(cmd)
+                    LocalCommands.parse(cmd)?.let { runLocal(it) } ?: runLearned(n, depth + 1) ?: askModel(cmd, n, false)
+                }.joinToString("\n")
+            }
+            Learning.MACRO -> Learning.macroCalls(hit.argumentsJson).filter { Learning.cacheable(it.first, it.second) }
+                .map { (n, a) -> execute(n, a) }.joinToString("\n").ifBlank { return null }
+            else -> {
+                val raw = try { JSONObject(hit.argumentsJson) } catch (e: Exception) { JSONObject() }
+                val args = if (hit.phrase.startsWith(Learning.TEMPLATE_PREFIX)) Learning.fill(raw, phrase) ?: return null else raw
+                if (!Learning.cacheable(hit.functionName, args)) return null
+                execute(hit.functionName, args)
             }
         }
+        patternDao.upsert(hit.copy(useCount = hit.useCount + 1, lastUsed = System.currentTimeMillis()))
+        return result
+    }
+
+    /** «Когда я говорю …, делай …»: запоминаем связку команд пользователя. */
+    private suspend fun teach(phrase: String, commands: List<String>): String {
+        patternDao.upsert(CommandPatternEntity(phrase = phrase, functionName = Learning.TAUGHT, argumentsJson = JSONArray(commands).toString()))
+        return "Запомнил: на «$phrase» буду делать — " + commands.joinToString("; ") + ". Работает без интернета." +
+            VisualSpec.block(VisualSpec.listJson("«$phrase»", "steps", commands.map { Visual.Item(it) }))
+    }
+
+    /** «Чему ты научился» — таблица выученного. */
+    private suspend fun learnedList(): String {
+        val all = patternDao.top(200)
+        if (all.isEmpty()) return "Пока ничего не выучил. Я запоминаю команды, которые понял через модель, — в следующий раз выполняю их сам, без интернета."
+        val taught = all.count { it.functionName == Learning.TAUGHT }
+        val rows = all.take(25).map { p ->
+            listOf(p.phrase.removePrefix(Learning.TEMPLATE_PREFIX).replace("#", "N"),
+                when (p.functionName) { Learning.TAUGHT -> "твоя связка"; Learning.MACRO -> "связка действий"; else -> p.functionName }, p.useCount.toString())
+        }
+        val table = org.json.JSONObject().put("type", "table").put("title", "Чему я научился").put("columns", JSONArray(listOf("Фраза", "Что делаю", "Раз")))
+            .put("rows", JSONArray(rows.map { JSONArray(it) }))
+        return "Выучено фраз: ${all.size} (из них твоих связок: $taught). Они выполняются без модели и без интернета. «Забудь фразу …» — удалить." +
+            VisualSpec.block(table)
     }
 
     // ---------------------------------------------------------------- выполнение функций
@@ -438,6 +520,22 @@ class AssistantRepository(private val context: Context, apiKey: String) {
 
             "device_info" -> withContext(Dispatchers.IO) { DeviceActions.report(context, a.optString("section", "all")) }
             "read_screen" -> ScreenAssist.ask(context, currentPrompt)
+            "screen_guide" -> withContext(Dispatchers.Main) { ScreenGuide.start(context, a.optString("goal", ""), a.optBoolean("auto", false)) }
+            "update_plan" -> "План принят"
+            "teach" -> teach(a.optString("phrase"), a.optJSONArray("commands")?.let { arr -> (0 until arr.length()).map { arr.optString(it) } }.orEmpty())
+            "learned" -> learnedList()
+            "forget" -> {
+                val what = normalize(a.optString("phrase"))
+                if (what.isEmpty() || what == "все" || what == "всё") {
+                    if (!confirmed) Confirm.ask("Забыть всё выученное (${patternDao.count()} фраз)? Команды снова будут понимать через модель.")
+                    else "Забыл всё: ${patternDao.deleteAll()} фраз."
+                } else {
+                    val n = patternDao.delete(what) + (Learning.template(what)?.let { patternDao.delete(it) } ?: 0)
+                    if (n > 0) "Забыл «$what»." else "Такой выученной фразы нет. Скажи «чему ты научился» — покажу список."
+                }
+            }
+            "mini_apps" -> withContext(Dispatchers.Main) { MiniApps.command(context, a.optStringOrNull("name")) }
+            "dev_report" -> withContext(Dispatchers.IO) { DevReport.share(context) }
             "screen_control" -> ScreenActions.control(context, a.optString("action", ""), a.optStringOrNull("text"), a.optStringOrNull("direction"))
             "screen_translate" -> ScreenAssist.translate(context, TranslateBatch.targetFrom(a.optString("language", "русский")))
             "live_screen" -> ScreenAssist.setLive(context, a.optBoolean("on", true))

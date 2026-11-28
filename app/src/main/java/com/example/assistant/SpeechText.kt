@@ -11,6 +11,7 @@ object SpeechText {
      */
     fun clean(text: String): String {
         val flat = text
+            .replace(Regex("```(visual|viz|chart|diagram|graph|table|tree|draw|plan)\\b.*?(```|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), " Схема на экране. ")
             .replace(Regex("```.*?```", RegexOption.DOT_MATCHES_ALL), " Код показан на экране. ")
             .replace(Regex("[*_#`▪]+"), " ")
             .replace(Regex("https?://\\S+"), "ссылка")
@@ -30,7 +31,7 @@ object SpeechText {
      * Короткие ответы (до ~260 символов) читаются целиком.
      */
     fun brief(text: String): String {
-        val hadCode = text.contains("```")
+        val hadCode = VisualSpec.withoutVisual(text).contains("```")
         val flat = clean(text)
         if (flat.length <= BRIEF_LIMIT) return flat
         val sentences = Regex("(?<=[.!?…])\\s+").split(flat).filter { it.isNotBlank() }
@@ -44,7 +45,7 @@ object SpeechText {
         }
         var out = sb.toString().ifBlank { flat.take(BRIEF_LIMIT) }
         if (out.length > BRIEF_LIMIT + 60) out = out.take(BRIEF_LIMIT).trimEnd() + "…"
-        return if (hadCode && !out.contains("Код показан")) "$out Код показан на экране." else "$out Подробности на экране."
+        return if (hadCode && !out.contains("Код показан")) "$out Код показан на экране." else if (out.contains("Схема на экране")) out else "$out Подробности на экране."
     }
 
     /** Короткое название трека для голоса: без скобок, хвостов вроде «Official Video» и не длиннее ~40 символов. */

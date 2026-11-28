@@ -71,7 +71,8 @@ object NotificationActions {
             PhoneActions.launch(context, android.content.Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             return "Нужен доступ к уведомлениям: открыл настройки — включи «Assistant». Или «Выдать все разрешения через Shizuku»."
         }
-        return NoticeText.format(NoticeText.filter(NotificationReader.snapshot(), app), app)
+        val items = NoticeText.filter(NotificationReader.snapshot(), app)
+        return NoticeText.format(items, app) + DeviceVisuals.notifications(items)
     }
 }
 

@@ -39,6 +39,8 @@ object LocalCommands {
         if (t.isEmpty()) return null
         val w = t.split(' ')
 
+        // «Когда я говорю „я дома“, включи вайфай и …» — пользователь учит связку (раньше заметок: там тоже «запомни»)
+        Learning.parseTeach(text)?.let { return LocalCommand("teach", mapOf("phrase" to it.first, "commands" to it.second)) }
         // Заметки: единственные команды, где текст может быть длинным
         parseNote(text, t)?.let { return it }
         // Калькулятор: «сколько будет 25 умножить на 4» (знаки и цифры нужны как есть, поэтому по исходному тексту)
@@ -552,6 +554,11 @@ object LocalCommands {
             .forEach { m[it] = LocalCommand("notifications") }
         listOf("проверь переключатели", "почему не выключается интернет", "почему не работают переключатели", "проверь шизуку", "проверь shizuku")
             .forEach { m[it] = LocalCommand("device_info", mapOf("section" to "toggles")) }
+        listOf("мои мини приложения", "покажи мини приложения", "мини приложения").forEach { m[it] = LocalCommand("mini_apps") }
+        listOf("чему ты научился", "что ты выучил", "покажи выученные команды", "выученные команды", "чему ты научилась").forEach { m[it] = LocalCommand("learned") }
+        listOf("забудь все выученное", "забудь всё выученное", "забудь все что выучил").forEach { m[TextMatch.normalize(it)] = LocalCommand("forget", mapOf("phrase" to "все")) }
+        listOf("отчет для разработчика", "отчёт для разработчика", "отправь отчет разработчику", "диагностика для разработчика", "собери отчет")
+            .forEach { m[TextMatch.normalize(it)] = LocalCommand("dev_report") }
         listOf("выдай все разрешения", "выдай разрешения", "дай себе все разрешения", "выдай себе разрешения через шизуку", "выдай все разрешения через шизуку")
             .forEach { m[it] = LocalCommand("grant_permissions") }
         listOf("верни файлы как было", "верни файлы", "отмени сортировку", "верни файлы на место", "отмени сортировку файлов").forEach { m[it] = LocalCommand("files", mapOf("action" to "undo")) }
@@ -565,6 +572,18 @@ object LocalCommands {
     /** Управление экраном, переводчик, живой экран, порядок в файлах, уведомления, разрешения. */
     private fun parseScreen(raw: String, t: String, w: List<String>): LocalCommand? {
         screenExact[t]?.let { return it }
+        // «покажи, как включить NFC», «научи меня отменять подписку», «сделай сам: включи тёмную тему»
+        Regex("^(?:покажи|подскажи на экране|проведи меня|веди меня) (?:мне )?(?:как|где) (.+)$").find(t)?.let {
+            return LocalCommand("screen_guide", mapOf("goal" to it.groupValues[1], "auto" to false))
+        }
+        Regex("^научи (?:меня )?(.+)$").find(t)?.let {
+            if (it.groupValues[1].split(' ').size >= 2) return LocalCommand("screen_guide", mapOf("goal" to it.groupValues[1], "auto" to false))
+        }
+        Regex("^(?:сделай сам|сделай за меня|сам сделай) (.+)$").find(t)?.let {
+            return LocalCommand("screen_guide", mapOf("goal" to it.groupValues[1], "auto" to true))
+        }
+        Regex("^(?:открой |запусти )?мини приложени\\p{L}* (.+)$").find(t)?.let { return LocalCommand("mini_apps", mapOf("name" to it.groupValues[1])) }
+        Regex("^забудь (?:фразу |команду )(.+)$").find(t)?.let { return LocalCommand("forget", mapOf("phrase" to it.groupValues[1])) }
         // «переведи экран», «переведи экран на английский», «переведи что на экране»
         if (w.firstOrNull()?.startsWith("перевед") == true && w.any { it.startsWith("экран") || it == "тут" || it == "здесь" || it == "страницу" || it == "приложение" }) {
             return LocalCommand("screen_translate", mapOf("language" to TranslateBatch.targetFrom(t)))

@@ -365,4 +365,16 @@ class LocalCommandsTest {
         assertCmd("выключи вай фай", "quick_setting", "setting" to "вай фай", "state" to "off")
         assertCmd("проверь переключатели", "device_info", "section" to "toggles")
     }
+
+    @Test fun guideLearningMiniApps() {
+        assertCmd("покажи, как включить NFC", "screen_guide", "goal" to "включить nfc", "auto" to false)
+        assertCmd("сделай сам включи тёмную тему", "screen_guide", "goal" to "включи темную тему", "auto" to true)
+        assertCmd("чему ты научился", "learned")
+        assertCmd("забудь фразу я дома", "forget", "phrase" to "я дома")
+        assertCmd("мои мини-приложения", "mini_apps")
+        assertCmd("отчёт для разработчика", "dev_report")
+        val teach = cmd("когда я говорю «я дома», включи вайфай и выключи мобильный интернет")
+        assertEquals("teach", teach?.name)
+        assertEquals("я дома", teach?.args?.get("phrase"))
+    }
 }

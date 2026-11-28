@@ -135,6 +135,14 @@
             android:taskAffinity="com.example.assistant.music"
             android:theme="@style/Theme.Music" />
 
+        <!-- Песочница мини-приложений: без интернета и доступа к телефону -->
+        <activity
+            android:name=".SandboxActivity"
+            android:exported="false"
+            android:label="Мини-приложение"
+            android:taskAffinity="com.example.assistant.sandbox"
+            android:theme="@style/Theme.Music" />
+
         <!-- Прозрачный экран голосовой команды из шторки -->
         <activity
             android:name=".VoiceActivity"

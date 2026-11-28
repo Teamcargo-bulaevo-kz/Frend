@@ -397,8 +397,64 @@ class AssistantAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val e = event ?: return
+        val pkg = e.packageName?.toString().orEmpty()
+        if (pkg == packageName) return
         // Перевод поверх экрана убираем, когда пользователь ушёл на другое окно
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) ScreenOverlay.onWindowChanged(event.packageName?.toString().orEmpty())
+        if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) ScreenOverlay.onWindowChanged(pkg)
+        // Подсказки «покажи как»: пользователь нажал или открылся новый экран — пора следующий шаг
+        if (e.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) ScreenGuide.onScreenChanged()
+    }
+
+    /** Элемент экрана для подсказок: номер, подпись, роль, место. */
+    class UiNode(val index: Int, val label: String, val role: String, val rect: android.graphics.Rect, val node: AccessibilityNodeInfo)
+
+    /** Видимые элементы, с которыми можно что-то сделать (кнопки, переключатели, поля, пункты списка). */
+    fun interactiveNodes(max: Int = 70): List<UiNode> {
+        val result = ArrayList<UiNode>()
+        val seen = HashSet<String>()
+        for (root in roots()) {
+            if (root.packageName == packageName) continue
+            val stack = ArrayDeque<AccessibilityNodeInfo>(); stack.add(root)
+            var visited = 0
+            while (stack.isNotEmpty() && visited < 2500 && result.size < max) {
+                val n = stack.removeLast()
+                visited++
+                if (!n.isVisibleToUser) continue
+                val actionable = n.isClickable || n.isCheckable || n.isEditable || n.isLongClickable
+                var label = nodeText(n).trim()
+                if (label.isEmpty() && actionable) {
+                    // Подпись кнопки часто у ребёнка
+                    for (i in 0 until n.childCount) { val ch = n.getChild(i) ?: continue; val t = nodeText(ch).trim(); if (t.isNotEmpty()) { label = t; break } }
+                }
+                if (label.isEmpty() && actionable) label = n.viewIdResourceName?.substringAfterLast('/')?.replace('_', ' ').orEmpty()
+                if (actionable && label.isNotEmpty() && !n.isPassword) {
+                    val r = android.graphics.Rect(); n.getBoundsInScreen(r)
+                    val key = "$label|${r.centerX() / 20}|${r.centerY() / 20}"
+                    if (r.width() > 4 && r.height() > 4 && seen.add(key)) {
+                        val role = when {
+                            n.isEditable -> "поле ввода"
+                            n.isCheckable -> "переключатель, " + if (n.isChecked) "вкл" else "выкл"
+                            n.className?.contains("Tab") == true -> "вкладка"
+                            else -> "кнопка"
+                        }
+                        result += UiNode(result.size + 1, label.take(60), role, r, n)
+                    }
+                }
+                for (i in n.childCount - 1 downTo 0) n.getChild(i)?.let { stack.add(it) }
+            }
+        }
+        // Сверху вниз, слева направо — так модели проще понимать экран
+        return result.sortedWith(compareBy({ it.rect.top / 40 }, { it.rect.left })).mapIndexed { i, u -> UiNode(i + 1, u.label, u.role, u.rect, u.node) }
+    }
+
+    /** Нажимает элемент (для «сделай сам»). */
+    fun press(u: UiNode): Boolean = clickNode(u.node) || tap(u.rect.exactCenterX(), u.rect.exactCenterY())
+
+    /** Название открытого приложения. */
+    fun currentAppLabel(): String {
+        val pkg = currentPackage()
+        return try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (e: Exception) { pkg }
     }
 
     override fun onInterrupt() = Unit

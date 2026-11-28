@@ -40,7 +40,7 @@ class AssistantService : Service() {
         /** Показывает последний запрос и ответ прямо в шторке. */
         fun showResult(context: Context, request: String, answer: String) {
             if (!running) return
-            lastText = "«$request»\n$answer".take(400)
+            lastText = "«$request»\n${VisualSpec.plain(answer)}".take(400)
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(NOTIFICATION_ID, build(context))
         }

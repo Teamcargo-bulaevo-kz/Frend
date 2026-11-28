@@ -33,6 +33,13 @@ object DeviceActions {
 
     /** section: battery, network, memory, storage, memory_all, apps_storage, apps_usage, processes, all. */
     fun report(context: Context, section: String): String {
+        val text = reportText(context, section)
+        // Картинка дублирует главное (заряд, память, место, приложения) — только если ответ не об ошибке доступа
+        if (text.startsWith("Для этого нужен") || text.startsWith("Не получилось")) return text
+        return text + DeviceVisuals.forSection(context, section.trim().lowercase())
+    }
+
+    private fun reportText(context: Context, section: String): String {
         val app = context.applicationContext
         return try {
             when (section.trim().lowercase()) {
